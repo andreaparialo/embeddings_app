@@ -1,0 +1,33 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Hybrid Product Search Engine: Project Overview
+
+This document provides a high-level overview of the application's structure and entry points.
+
+## Core Functionality
+
+This is a `FastAPI` application that provides a powerful product search engine with multiple search modes:
+- Image similarity search using the GME model and LoRA adapters.
+- SKU-based and filter-based text search.
+- Advanced batch processing via Excel file uploads.
+
+## Main Entry Point
+
+The primary entry point for the application is [app.py](mdc:app.py). This file sets up the `FastAPI` server, defines all API endpoints, and initializes the search engine on startup.
+
+## How to Run the Application
+
+The recommended way to start the application with full GPU acceleration is by using the startup script:
+- **[start_gpu.sh](mdc:start_gpu.sh)**: This script configures the environment, activates the correct Conda environment, and launches the app using `uvicorn`.
+
+## Key Directories
+
+The application relies on several key data directories located in the project root:
+- `pictures/`: Contains all product images.
+- `database_results/`: Stores the main product database CSV (`final_with_aws_shapes_enriched.csv`).
+- `indexes/`: Contains the pre-computed `FAISS` indexes and their corresponding metadata and embeddings files.
+- `loras/`: Holds the LoRA adapter checkpoints used to fine-tune the GME model.
+- `templates/`: Contains the `Jinja2` HTML templates for the web UI.

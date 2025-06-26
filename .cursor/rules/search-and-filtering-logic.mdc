@@ -1,0 +1,35 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Search and Filtering Logic
+
+This document explains the core search and filtering pipeline of the application.
+
+## Central Search Hub
+
+The [search_engine.py](mdc:search_engine.py) file contains the `HybridSearchEngine` class, which acts as the central orchestrator for all search operations, including image similarity, SKU, and filter-based searches.
+
+## Advanced Filtering Pipeline
+
+The application uses a sophisticated multi-stage filtering process to ensure both performance and accuracy.
+
+### 1. Pre-filtering (Before Similarity Search)
+
+To dramatically speed up searches, the system first filters the entire dataset *before* performing the `FAISS` vector search. This logic is encapsulated in the `OptimizedFAISSSearch` class within [optimized_faiss_search.py](mdc:optimized_faiss_search.py). This class can create temporary, smaller `FAISS` indexes on-the-fly for maximum efficiency.
+
+### 2. Post-filtering (After Similarity Search)
+
+After getting results from `FAISS`, a second filtering pass can be applied to refine the results based on criteria that were not used in the pre-filter stage.
+
+## Centralized Filter Configuration
+
+All filtering behavior is controlled by a single configuration file: **[config_filtering.py](mdc:config_filtering.py)**. This file is the single source of truth for:
+- **Baseline Filters**: Global rules that exclude certain products (e.g., by release year or status) from all searches.
+- **Pre-filter Columns**: A specific list of columns designated for the efficient pre-filtering stage.
+- **Range Filtering**: Defines which numeric columns should use range-based matching (e.g., price `±25%`) and their respective tolerances.
+
+## Batch Processing
+
+For complex batch operations that combine image search with detailed filtering, the logic is handled by [batch_processor_optimized.py](mdc:batch_processor_optimized.py). This module leverages the `OptimizedFAISSSearch` class to efficiently process large batches of SKUs from uploaded Excel files.

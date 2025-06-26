@@ -1,0 +1,23 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# Model and Data Loading
+
+This document outlines how the application loads machine learning models, `FAISS` indexes, and the product database.
+
+## Data and Index Loading
+
+All data loading operations are handled by the `DataLoader` class in [data_loader.py](mdc:data_loader.py). This class is a singleton instance responsible for:
+- Loading the main product database from `database_results/final_with_aws_shapes_enriched.csv`.
+- Loading the `FAISS` index, embeddings (`.npy`), and metadata (`.json`) from the `indexes/` directory.
+- Transferring the `FAISS` index to the GPU if available.
+- Creating the critical mappings between `filename_root` and `FAISS` index positions.
+
+## GME Model and LoRA Adapters
+
+The core GME model is managed by the `GMEModel` class in [gme_model.py](mdc:gme_model.py). Its key responsibilities include:
+- **Lazy Loading**: The large `gme-Qwen2-VL-7B-Instruct` model is only loaded into memory when the first image search is performed to conserve resources on startup.
+- **LoRA Integration**: It dynamically loads the appropriate LoRA adapter from the `loras/` directory based on the selected checkpoint. It uses the `peft` library for this.
+- **Image Encoding**: It provides the `encode_image` method used by the search engine to convert query images into vector embeddings.

@@ -73,3 +73,18 @@ indexes/
 
 # GPU memory dumps
 *.dump 
+# Data files
+
+
+# Model directories
+gme-Qwen2-VL-7B-Instruct/
+gme-qwen2-vl-7b-instruct/
+
+# Installer files
+Miniconda3-*.sh
+
+# Cursor IDE files
+
+
+# Batch results
+batch_search_results*.xlsx

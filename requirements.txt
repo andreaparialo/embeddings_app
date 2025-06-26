@@ -32,3 +32,5 @@ nvidia-ml-py3>=7.352.0
 psutil>=5.8.0
 
 accelerate
+
+openpyxl
