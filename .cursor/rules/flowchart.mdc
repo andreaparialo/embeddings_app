@@ -1,0 +1,57 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+graph TB
+    subgraph "Client Layer"
+        UI["Web UI<br/>(Jinja2 Templates)"]
+        Excel["Excel Files<br/>(Batch Upload)"]
+    end
+    
+    subgraph "API Layer"
+        FastAPI["FastAPI Server<br/>(app.py)"]
+        Endpoints["Endpoints<br/>• /search/image<br/>• /search/sku<br/>• /search/batch-enhanced"]
+    end
+    
+    subgraph "Search Layer"
+        SE["Search Engine<br/>(search_engine.py)"]
+        BP["Batch Processor<br/>(batch_processor_optimized.py)"]
+        OFS["Optimized FAISS Search<br/>(optimized_faiss_search.py)"]
+    end
+    
+    subgraph "Model Layer"
+        GME["GME-Qwen2-VL Model<br/>(gme_model.py)"]
+        LORA["LoRA Adapters<br/>(checkpoint-1095)"]
+        OC["OpenCLIP Model<br/>(openclip_model.py)"]
+    end
+    
+    subgraph "Data Layer"
+        DL["Data Loader<br/>(data_loader.py)"]
+        FAISS["FAISS Index<br/>(29,136 embeddings)"]
+        CSV["Product Database<br/>(34,431 SKUs)"]
+        Images["Product Images<br/>(29,104 files)"]
+    end
+    
+    subgraph "GPU Infrastructure"
+        GPU["4x NVIDIA A100<br/>(40GB each)"]
+        FGPU["FAISS GPU Utils<br/>(faiss_gpu_utils.py)"]
+    end
+    
+    UI --> FastAPI
+    Excel --> FastAPI
+    FastAPI --> Endpoints
+    Endpoints --> SE
+    Endpoints --> BP
+    SE --> GME
+    SE --> OC
+    BP --> OFS
+    OFS --> FAISS
+    SE --> DL
+    BP --> DL
+    DL --> FAISS
+    DL --> CSV
+    GME --> LORA
+    GME --> Images
+    FAISS --> FGPU
+    FGPU --> GPU

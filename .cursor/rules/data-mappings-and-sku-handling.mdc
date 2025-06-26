@@ -1,0 +1,159 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Data Mappings and SKU Handling
+
+This document explains the complex data relationships and SKU handling logic in the system.
+
+## Data Architecture
+
+### The Two-Layer System
+1. **Database Layer**: 34,431 SKU-based product records (CSV)
+2. **Embedding Layer**: 29,136 filename-based vector embeddings (FAISS)
+
+### Why the Mismatch?
+- Multiple SKUs can share the same product image
+- One `filename_root` → Multiple `SKU_COD` entries
+- Embeddings are created per unique image, not per SKU
+
+## Critical Mappings
+
+### Core Mapping Objects in [data_loader.py](mdc:data_loader.py)
+
+```python
+# filename_root to embedding index
+self.filename_to_idx = {}  # {'2087270FMP53HA': 0, ...}
+
+# Reverse mapping
+self.idx_to_filename_root = {}  # {0: '2087270FMP53HA', ...}
+
+# SKU to filename_root (derived)
+# Uses derive_filename_root_from_sku() function
+```
+
+### The Translation Chain
+```
+User Input: SKU_COD
+    ↓ (derive_filename_root)
+filename_root
+    ↓ (filename_to_idx)
+embedding_index
+    ↓ (FAISS search)
+similar_embedding_indices
+    ↓ (idx_to_filename_root)
+similar_filename_roots
+    ↓ (DataFrame lookup)
+All SKUs with those filename_roots
+```
+
+## SKU to Filename Derivation
+
+### The Algorithm in [app.py](mdc:app.py)
+
+```python
+def derive_filename_root_from_sku(sku_cod, product_type=None):
+    """
+    If PRODUCT_TYPE != 1:
+        SKU_COD = MODEL_COD (6) + COLOR_COD (3) + SIZE_COD (2) + ZLENSCODE (2)
+        filename_root = MODEL_COD (6) + "0" + COLOR_COD (3) + ZLENSCODE (2)
+    
+    If PRODUCT_TYPE == 1:
+        SKU_COD = MODEL_COD (6) + COLOR_COD (3) + SIZE_COD (2) + Something_else (2)
+        filename_root = MODEL_COD (6) + "0" + COLOR_COD (3) + "00"
+    """
+```
+
+### Examples
+- SKU: `20872780S53HA` → filename_root: `2087270S53HA`
+- SKU: `1097429005220` → filename_root: `109742000522` (PRODUCT_TYPE=1)
+
+## SKU Search Strategies
+
+### Implemented in `find_sku_with_fallback()` in [app.py](mdc:app.py)
+
+1. **Direct SKU Search**: Exact match in DataFrame
+2. **Filename Root Derivation**: Convert SKU → filename_root → search
+3. **Partial Matching**: For truncated SKUs (especially starting with "1")
+4. **MODEL_COD Search**: Extract first 6 digits and search
+
+### Handling Truncated SKUs
+```python
+# For SKUs starting with "1" that might be truncated
+if len(sku_cod) < 13 and sku_cod.startswith('1'):
+    # Try partial filename_root matching
+    partial_pattern = f"{model_cod}0{color_cod}"
+    partial_matches = df[df['filename_root'].str.startswith(partial_pattern)]
+```
+
+## Batch Processing Data Flow
+
+### In [batch_processor_optimized.py](mdc:batch_processor_optimized.py)
+
+1. **Group by Image**: Multiple SKUs → Same filename_root
+2. **Get Embeddings**: One embedding per unique filename_root
+3. **Search FAISS**: Returns embedding indices
+4. **Expand Results**: Map back to all SKUs sharing those images
+
+### Critical Code Section
+```python
+# Convert embedding index back to all related SKUs
+if embedding_idx in self.data_loader.idx_to_filename_root:
+    similar_filename_root = self.data_loader.idx_to_filename_root[embedding_idx]
+    
+    # Find ALL SKUs with this filename_root
+    matching_rows = self.data_loader.df[
+        self.data_loader.df['filename_root'] == similar_filename_root
+    ]
+```
+
+## Path Handling Complexities
+
+### File Naming Variations
+- With suffix: `2087270FMP53HA_O00.jpg`
+- Without suffix: `2087270FMP53HA.jpg`
+- Case variations: `.jpg` vs `.JPG`
+
+### Path Resolution in [data_loader.py](mdc:data_loader.py)
+```python
+def get_image_path(self, filename_root):
+    # Try multiple variations
+    for ext in ['.jpg', '.JPG']:
+        for suffix in ['_O00', '']:
+            filename = f"{filename_root}{suffix}{ext}"
+            if os.path.exists(os.path.join(self.pictures_dir, filename)):
+                return filename
+```
+
+## Common Issues and Solutions
+
+### Issue 1: "No embedding found for filename_root"
+**Cause**: Mismatch in filename_root format
+**Solution**: Check variations (case, suffixes) in `_get_embedding_for_filename()`
+
+### Issue 2: SKU not found in batch search
+**Cause**: SKU format doesn't match derivation rules
+**Solution**: Use fallback strategies in `find_sku_with_fallback()`
+
+### Issue 3: Wrong number of results
+**Cause**: Not accounting for multiple SKUs per image
+**Solution**: Properly expand results after FAISS search
+
+## Key Database Columns
+
+| Column | Description | Example |
+|--------|-------------|---------|
+| SKU_COD | Unique product SKU | 20872780S53HA |
+| filename_root | Image filename base | 2087270S53HA |
+| MODEL_COD | First 6 digits of SKU | 208727 |
+| COLOR_COD | Digits 7-9 of SKU | 80S |
+| PRODUCT_TYPE_COD | Determines filename rules | 0 or 1 |
+
+## Best Practices
+
+1. **Always verify mappings** when debugging search issues
+2. **Check both directions**: SKU→filename and filename→SKU
+3. **Handle edge cases**: Truncated SKUs, missing images
+4. **Log extensively**: Trace the full translation chain
+5. **Test with known examples**: Verify derivation logic

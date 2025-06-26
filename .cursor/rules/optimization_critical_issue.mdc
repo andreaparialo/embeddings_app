@@ -1,0 +1,26 @@
+graph LR
+    subgraph "Critical Issues & Solutions"
+        I1["Slow GPU Transfer<br/>(2-5 minutes)"]
+        S1["Solution: Use conda-installed<br/>FAISS instead of pip<br/>(2-5 seconds)"]
+        
+        I2["Filtering Bug<br/>(Wrong date results)"]
+        S2["Solution: Split pre/post<br/>filtering stages"]
+        
+        I3["SKU Alignment<br/>(34k SKUs vs 29k images)"]
+        S3["Solution: filename_root<br/>mapping system"]
+        
+        I4["Batch Performance<br/>(6 imgs/sec)"]
+        S4["Solution: Bulk operations<br/>(100+ imgs/sec)"]
+        
+        I1 --> S1
+        I2 --> S2
+        I3 --> S3
+        I4 --> S4
+    end
+    
+    subgraph "Optimizations"
+        O1["Float16 Precision<br/>(50% memory savings)"]
+        O2["Multi-GPU Distribution<br/>(4x throughput)"]
+        O3["Pre-filtering<br/>(10-100x speedup)"]
+        O4["Filter Caching<br/>(Avoid recomputation)"]
+    end

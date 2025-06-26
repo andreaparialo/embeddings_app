@@ -1,35 +1,199 @@
 ---
-description:
-globs:
+description: 
+globs: 
 alwaysApply: false
 ---
 # Search and Filtering Logic
 
-This document explains the core search and filtering pipeline of the application.
+This document explains the sophisticated multi-stage search and filtering pipeline that powers the application.
 
-## Central Search Hub
+## Search Architecture
 
-The [search_engine.py](mdc:search_engine.py) file contains the `HybridSearchEngine` class, which acts as the central orchestrator for all search operations, including image similarity, SKU, and filter-based searches.
+### Search Types
+1. **Image Similarity Search**: Upload image → GME encoding → FAISS vector search
+2. **SKU Search**: Direct lookup with multiple fallback strategies
+3. **Filter Search**: Database queries with column-based filtering
+4. **Batch Search**: Excel upload → Bulk processing → Results download
 
-## Advanced Filtering Pipeline
+## The Multi-Stage Filtering Pipeline
 
-The application uses a sophisticated multi-stage filtering process to ensure both performance and accuracy.
+### Overview
+The system uses a carefully designed three-stage filtering approach:
 
-### 1. Pre-filtering (Before Similarity Search)
+```
+Stage 1: Baseline Filters (Always Applied)
+    ↓
+Stage 2: Pre-filters (Before FAISS Search)
+    ↓
+Stage 3: Post-filters (After FAISS Search)
+```
 
-To dramatically speed up searches, the system first filters the entire dataset *before* performing the `FAISS` vector search. This logic is encapsulated in the `OptimizedFAISSSearch` class within [optimized_faiss_search.py](mdc:optimized_faiss_search.py). This class can create temporary, smaller `FAISS` indexes on-the-fly for maximum efficiency.
+### Stage 1: Baseline Filters
 
-### 2. Post-filtering (After Similarity Search)
+Configured in [config_filtering.py](mdc:config_filtering.py), these filters are ALWAYS applied to exclude certain products:
 
-After getting results from `FAISS`, a second filtering pass can be applied to refine the results based on criteria that were not used in the pre-filter stage.
+```python
+# Status filter - only include these status codes
+BASELINE_STATUS_CODES = ['IL', 'NS', 'NF', 'OB', 'AA']
+ENABLE_BASELINE_STATUS_FILTER = True
 
-## Centralized Filter Configuration
+# Date filter - exclude specific years and dates
+BASELINE_EXCLUDE_YEARS = [2025, 2026]
+BASELINE_EXCLUDE_DATES = ['2025-01-01', '2026-01-01']
+ENABLE_BASELINE_DATE_FILTER = True
+```
 
-All filtering behavior is controlled by a single configuration file: **[config_filtering.py](mdc:config_filtering.py)**. This file is the single source of truth for:
-- **Baseline Filters**: Global rules that exclude certain products (e.g., by release year or status) from all searches.
-- **Pre-filter Columns**: A specific list of columns designated for the efficient pre-filtering stage.
-- **Range Filtering**: Defines which numeric columns should use range-based matching (e.g., price `±25%`) and their respective tolerances.
+### Stage 2: Pre-filtering (Performance Critical)
 
-## Batch Processing
+Applied BEFORE the FAISS vector search to dramatically reduce the search space:
 
-For complex batch operations that combine image search with detailed filtering, the logic is handled by [batch_processor_optimized.py](mdc:batch_processor_optimized.py). This module leverages the `OptimizedFAISSSearch` class to efficiently process large batches of SKUs from uploaded Excel files.
+```python
+# Only these columns are used for pre-filtering
+PREFILTER_COLUMNS = [
+    'BRAND_DES',
+    'USERGENDER_DES', 
+    'PRODUCT_TYPE_COD',
+    'MD_SKU_STATUS_COD'
+]
+```
+
+**Why these columns?**
+- They define broad product categories
+- Significantly reduce search space (e.g., RAY-BAN + MAN)
+- Don't over-constrain results
+
+### Stage 3: Post-filtering (Fine-grained Control)
+
+All other selected columns are applied AFTER finding visually similar products:
+
+```python
+# Example post-filter columns
+postfilter_columns = [
+    'CTM_FIRST_FRONT_MATERIAL_DES',
+    'FITTING_DES',
+    'GRANULAR_SHAPE_AWS',
+    'MACRO_SHAPE_AWS',
+    'RIM_TYPE_DES',
+    # ... and more
+]
+```
+
+## Range-Based Filtering
+
+For numeric columns, the system supports tolerance-based matching:
+
+```python
+# Columns that use range filtering
+RANGE_FILTER_COLUMNS = [
+    'NET_SALES_PRICE_AM_EURO',
+    'FRONT_HEIGHT_VAL',
+    'LENS_WIDTH_VAL',
+    'LENS_HEIGHT_VAL',
+    'BRIDGE_VAL'
+]
+
+# Default tolerances
+RANGE_FILTER_TOLERANCES = {
+    'NET_SALES_PRICE_AM_EURO': 0.25,  # ±25%
+    'FRONT_HEIGHT_VAL': 0.20,         # ±20%
+    'LENS_WIDTH_VAL': 0.15,           # ±15%
+    # ...
+}
+```
+
+### Example
+If source product has `FRONT_HEIGHT_VAL = 50`:
+- With 20% tolerance: accepts values between 40 and 60
+
+## The OptimizedFAISSSearch Class
+
+Located in [optimized_faiss_search.py](mdc:optimized_faiss_search.py), this class implements the pre-filtering logic:
+
+### Key Methods
+
+```python
+def get_filtered_indices(self, filters: Dict) -> np.ndarray:
+    """Get embedding indices that match filters"""
+    # Apply filters to DataFrame
+    # Convert to embedding indices
+    # Cache results for performance
+    
+def batch_search_with_prefilter(self, queries, top_k):
+    """Perform batch search with pre-filtering"""
+    # Group queries by filter combination
+    # Create filtered indexes on-the-fly
+    # Execute parallel searches
+```
+
+### Optimization Strategies
+
+1. **Filter Caching**: Caches filter combinations to avoid recomputation
+2. **IDSelector**: For moderate filters (>10% of data)
+3. **Temporary Index**: For very selective filters (<10% of data)
+4. **Parallel Processing**: Uses ThreadPoolExecutor for multi-GPU search
+
+## Batch Processing Logic
+
+The [batch_processor_optimized.py](mdc:batch_processor_optimized.py) orchestrates complex batch operations:
+
+### Process Flow
+1. **Load Excel** → Extract SKUs
+2. **Find SKUs** → Get filename_roots  
+3. **Group by Image** → One embedding per unique image
+4. **Apply Pre-filters** → Reduce search space
+5. **FAISS Search** → Find similar embeddings
+6. **Apply Post-filters** → Refine results
+7. **Expand Results** → Map back to all related SKUs
+
+### Critical Code Section
+```python
+# Define pre vs post filter columns
+prefilter_columns = [col for col in config_filtering.get_prefilter_columns() 
+                    if col in matching_cols]
+postfilter_columns = [col for col in matching_cols 
+                     if col not in prefilter_columns]
+```
+
+## Gender Handling (UNISEX Grouping)
+
+When "Group Unisex" is enabled:
+```python
+if source_gender in ['MAN', 'WOMAN']:
+    # Search for both specific gender AND unisex
+    filters['USERGENDER_DES'] = [source_gender, 'UNISEX ADULT']
+```
+
+## Performance Impact
+
+### Without Pre-filtering
+- Searches all 29,136 embeddings
+- Slow with strict filters
+- Many irrelevant results
+
+### With Pre-filtering
+- Searches only relevant subset (e.g., 230 embeddings)
+- 10-100x faster
+- More relevant results
+
+## Configuration Best Practices
+
+1. **Baseline Filters**: Keep minimal to avoid over-filtering
+2. **Pre-filter Columns**: Only broad categories
+3. **Post-filter Columns**: Detailed attributes
+4. **Range Tolerances**: Balance precision vs recall
+
+## Debugging Filters
+
+Enable debug logging to trace filtering:
+```python
+# In config_filtering.py
+logger.info(f"Pre-filter: {len(filtered_indices)} embeddings")
+logger.info(f"Post-filter: {items_before} → {items_after} items")
+```
+
+## Common Issues
+
+1. **No results**: Filters too restrictive → Check baseline filters
+2. **Wrong results**: Missing post-filters → Verify column selection
+3. **Slow search**: No pre-filtering → Check PREFILTER_COLUMNS
+4. **Date clustering**: Wrong filter stage → Use post-filtering for dates

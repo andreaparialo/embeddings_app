@@ -1,0 +1,303 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+# API Endpoints and Usage Patterns
+
+This document provides comprehensive documentation for all API endpoints and their usage patterns.
+
+## Base URL
+```
+http://127.0.0.1:8080
+```
+
+## Core Endpoints
+
+### 1. Image Similarity Search
+
+**Endpoint**: `POST /search/image`
+
+**Purpose**: Find products visually similar to an uploaded image
+
+**Parameters**:
+- `file` (multipart/form-data): Image file to search with
+- `filters` (string): JSON string of filters to apply
+- `top_k` (int): Number of results to return (default: 50)
+
+**Example Request**:
+```python
+import requests
+
+with open('query_image.jpg', 'rb') as f:
+    files = {'file': f}
+    data = {
+        'filters': '{"BRAND_DES": "RAY-BAN", "USERGENDER_DES": "MAN"}',
+        'top_k': 50
+    }
+    response = requests.post('http://127.0.0.1:8080/search/image', 
+                           files=files, data=data)
+```
+
+**Response**:
+```json
+{
+  "results": [
+    {
+      "SKU_COD": "20872780S53HA",
+      "similarity_score": 0.125,
+      "BRAND_DES": "CARRERA",
+      "MODEL_COD": "208727",
+      "filename_root": "2087270S53HA",
+      "image_path": "/pictures/2087270S53HA_O00.jpg",
+      // ... other product fields
+    }
+  ],
+  "total": 50,
+  "search_type": "image_similarity",
+  "filters_applied": ["BRAND_DES", "USERGENDER_DES"]
+}
+```
+
+### 2. SKU Search
+
+**Endpoint**: `POST /search/sku`
+
+**Purpose**: Search by SKU code with fallback strategies
+
+**Parameters**:
+- `sku` (string): SKU code to search for
+- `top_k` (int): Number of results (default: 50)
+
+**Example**:
+```python
+data = {'sku': '20872780S53HA', 'top_k': 10}
+response = requests.post('http://127.0.0.1:8080/search/sku', data=data)
+```
+
+### 3. Enhanced Batch Search
+
+**Endpoint**: `POST /search/batch-enhanced`
+
+**Purpose**: Process multiple SKUs from Excel with advanced filtering
+
+**Parameters**:
+- `file` (multipart/form-data): Excel file with SKUs
+- `matching_columns` (string): JSON array of columns to match
+- `max_results_per_sku` (int): Results per SKU (1-50)
+- `exclude_same_model` (bool): Exclude same MODEL_COD
+- `allowed_status_codes` (string): JSON array of status codes
+- `group_unisex` (bool): Include UNISEX when searching MAN/WOMAN
+- `dual_engine` (bool): Use multiple model checkpoints
+
+**Excel Format**:
+```
+SKU_COD
+20872780S53HA
+1097429005220
+208727FMP539O
+```
+
+**Example Request**:
+```python
+with open('skus.xlsx', 'rb') as f:
+    files = {'file': f}
+    data = {
+        'matching_columns': '["BRAND_DES", "USERGENDER_DES", "MACRO_SHAPE_AWS"]',
+        'max_results_per_sku': 10,
+        'exclude_same_model': True,
+        'allowed_status_codes': '["IL", "NS"]',
+        'group_unisex': True,
+        'dual_engine': False
+    }
+    response = requests.post('http://127.0.0.1:8080/search/batch-enhanced',
+                           files=files, data=data)
+```
+
+**Response**: Excel file download with columns:
+- Input_SKU
+- Similar_SKU
+- Similarity_Score
+- Source_{column} / Similar_{column} for each matching column
+
+### 4. Filter-Only Batch Search
+
+**Endpoint**: `POST /search/batch-filter-only`
+
+**Purpose**: Fast database filtering without image similarity
+
+**Use Case**: When you only need products matching specific attributes, no visual similarity needed
+
+**Response Time**: Much faster than image-based search
+
+### 5. Filter Options
+
+**Endpoint**: `GET /api/filters`
+
+**Purpose**: Get available filter values for dropdowns
+
+**Response**:
+```json
+{
+  "BRAND_DES": ["ARNETTE", "CARRERA", "GUCCI", "OAKLEY", "RAY-BAN", ...],
+  "USERGENDER_DES": ["MAN", "WOMAN", "UNISEX ADULT", "KID"],
+  "MACRO_SHAPE_AWS": ["NAVIGATOR", "ROUND", "SQUARE", ...],
+  // ... other filterable columns
+}
+```
+
+### 6. Filename Search
+
+**Endpoint**: `POST /api/search/filename`
+
+**Purpose**: Search by filename_root (internal use)
+
+**Parameters**:
+- `filename_root` (string): Image filename without extension
+- `filters` (string): JSON filters
+- `top_k` (int): Number of results
+
+### 7. Change Checkpoint
+
+**Endpoint**: `POST /api/change-checkpoint`
+
+**Purpose**: Switch between different LoRA model checkpoints
+
+**Parameters**:
+- `checkpoint` (string): Checkpoint name (e.g., "1095", "2190")
+
+**Note**: Changing checkpoints requires reloading the model (takes ~30 seconds)
+
+## Web UI Endpoints
+
+### Home Page
+**Endpoint**: `GET /`
+
+Renders the main search interface with:
+- Image upload area
+- SKU search box
+- Filter dropdowns
+- Batch upload section
+
+## Advanced Usage Patterns
+
+### 1. Multi-Filter Image Search
+
+Combine visual similarity with multiple attribute filters:
+
+```python
+filters = {
+    "BRAND_DES": "RAY-BAN",
+    "USERGENDER_DES": "MAN",
+    "MACRO_SHAPE_AWS": "AVIATOR",
+    "RIM_TYPE_DES": "FULL RIM",
+    "NET_SALES_PRICE_AM_EURO": 250  # Will use ±25% range
+}
+```
+
+### 2. Batch Processing Best Practices
+
+For optimal performance:
+- Keep Excel files under 10,000 rows
+- Use minimal matching columns for pre-filtering
+- Enable `exclude_same_model` to get variety
+- Download results immediately (temporary files)
+
+### 3. Gender-Aware Search
+
+When searching for MAN/WOMAN products:
+```python
+# Without group_unisex: Only returns MAN products
+# With group_unisex: Returns MAN + UNISEX ADULT products
+data['group_unisex'] = True
+```
+
+### 4. Status Code Filtering
+
+Default allowed status codes:
+- `IL`: In Line
+- `NS`: New Season
+- `NF`: New Fashion
+- `OB`: Obsolete
+- `AA`: Active Article
+
+### 5. Handling Large Result Sets
+
+For large batches:
+1. Use `max_results_per_sku = 5` initially
+2. Process in chunks if >5000 SKUs
+3. Monitor response time
+4. Consider filter-only search if no visual similarity needed
+
+## Error Handling
+
+### Common Error Responses
+
+```json
+{
+  "error": "Search engine not initialized"
+}
+```
+
+```json
+{
+  "error": "No embedding found for filename_root: XYZ"
+}
+```
+
+```json
+{
+  "error": "Invalid filter format"
+}
+```
+
+### Best Practices
+
+1. **Always check initialization**: `/api/status`
+2. **Validate filters**: Ensure JSON format is correct
+3. **Handle timeouts**: Large batches may take 30+ seconds
+4. **Check file formats**: Only .jpg/.JPG for images, .xlsx/.xls for Excel
+
+## Performance Tips
+
+1. **Pre-warm the system**: First search loads models (30s)
+2. **Reuse connections**: Keep session alive
+3. **Batch similar requests**: Group by filter combinations
+4. **Monitor GPU**: Check `/api/status` for GPU memory
+
+## Integration Example
+
+```python
+class ProductSearchClient:
+    def __init__(self, base_url="http://127.0.0.1:8080"):
+        self.base_url = base_url
+        self.session = requests.Session()
+    
+    def search_by_image(self, image_path, filters=None, top_k=50):
+        with open(image_path, 'rb') as f:
+            files = {'file': f}
+            data = {
+                'filters': json.dumps(filters or {}),
+                'top_k': top_k
+            }
+            response = self.session.post(
+                f"{self.base_url}/search/image",
+                files=files,
+                data=data
+            )
+        return response.json()
+    
+    def batch_search(self, excel_path, matching_columns, **kwargs):
+        with open(excel_path, 'rb') as f:
+            files = {'file': f}
+            data = {
+                'matching_columns': json.dumps(matching_columns),
+                **kwargs
+            }
+            response = self.session.post(
+                f"{self.base_url}/search/batch-enhanced",
+                files=files,
+                data=data
+            )
+        return response.content  # Returns Excel file
+```

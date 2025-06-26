@@ -1,0 +1,154 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Indexing Strategies and Pipelines
+
+This document covers the various indexing approaches for creating and updating FAISS indexes with LoRA-enhanced embeddings.
+
+## Overview
+
+The project supports multiple indexing strategies to handle the 29,104 product images efficiently using LoRA-enhanced GME models.
+
+## 1. Delta Indexing (Incremental Updates)
+
+The most efficient approach for adding new products without re-indexing everything.
+
+### Current Situation
+- **Existing Index**: 27,018 images in `v11_o00_index_1095`
+- **Current Images**: 29,104 in `pictures/`
+- **Delta**: 2,086 new images to index
+
+### Delta Pipeline Scripts
+1. **[analyze_delta.py](mdc:indexing_script_fast/analyze_delta.py)** - Identifies new images
+2. **[prepare_delta_images.py](mdc:indexing_script_fast/prepare_delta_images.py)** - Resizes new images to 512px
+3. **[index_delta_only.py](mdc:indexing_script_fast/index_delta_only.py)** - Creates embeddings for delta
+4. **[merge_indexes.py](mdc:indexing_script_fast/merge_indexes.py)** - Merges delta with existing index
+
+### Performance
+- **Time**: 20-30 minutes (vs 2-3 hours for full re-index)
+- **Efficiency**: 85% time reduction
+- **Resources**: Only processes 7% of total images
+
+### Usage
+```bash
+cd indexing_script_fast
+python analyze_delta.py
+python prepare_delta_images.py
+python index_delta_only.py
+python merge_indexes.py
+```
+
+## 2. Full LoRA Indexing
+
+For complete re-indexing with optimizations.
+
+### High-Performance Scripts
+- **[lora_max_performance_indexing.py](mdc:indexing_script_fast/lora_max_performance_indexing.py)** - Adaptive batching
+- **[lora_optimized_indexing.py](mdc:indexing_script_fast/lora_optimized_indexing.py)** - Multi-GPU with workers
+
+### Key Optimizations
+1. **Image Preparation**: Resize to 512px for 50-70% faster processing
+2. **Multi-GPU Distribution**: Uses all 4 A100s simultaneously
+3. **Worker-Based Threading**: Concurrent I/O and GPU operations
+4. **Adaptive Batch Sizing**: Optimizes memory usage
+
+### Complete Pipeline
+```bash
+# Option 1: Test first
+./test_image_prep.sh
+
+# Option 2: Full pipeline
+./run_complete_indexing.sh
+```
+
+## 3. Worker Analysis
+
+See [WORKER_ANALYSIS.md](mdc:WORKER_ANALYSIS.md) for detailed analysis.
+
+### Current Issues
+- Sequential processing (1 GPU, no workers)
+- 13+ hours for 29K images
+
+### Proposed Solution
+```python
+# Multi-GPU worker architecture
+with ThreadPoolExecutor(max_workers=8) as executor:
+    for i, img_path in enumerate(image_paths):
+        gpu_id = i % 4  # Round-robin GPU assignment
+        future = executor.submit(process_on_gpu, img_path, gpu_id)
+```
+
+### Expected Performance
+- **Current**: 0.7 images/second (1 GPU)
+- **Optimized**: 4-8 images/second (4 GPUs + workers)
+- **Time**: 13 hours → 2-3 hours
+
+## 4. GME Model Indexing
+
+Alternative indexing using GME model directly.
+
+### Scripts
+- **[gme_optimized_batch_indexing.py](mdc:indexing_script_fast/gme_optimized_batch_indexing.py)** - Batch processing
+- **[gme_fast_gpu_indexing.py](mdc:indexing_script_fast/gme_fast_gpu_indexing.py)** - Multi-GPU indexing
+
+## 5. Image Preparation
+
+Critical preprocessing step for all indexing methods.
+
+### Script: [prepare_images.py](mdc:indexing_script_fast/prepare_images.py)
+- **Resizes** to 512px max dimension
+- **Preserves** aspect ratio
+- **Uses** LANCZOS resampling
+- **Multi-threaded** with 8 workers
+- **Saves** 50-70% processing time
+
+### Benefits
+- Faster model inference
+- Lower memory usage
+- Consistent image sizes
+- No quality loss (95% JPEG)
+
+## Key Files and Directories
+
+```
+indexing_script_fast/
+├── Delta Indexing
+│   ├── analyze_delta*.py
+│   ├── prepare_delta_images.py
+│   ├── index_delta_only.py
+│   └── merge_indexes.py
+├── LoRA Indexing
+│   ├── lora_max_performance_indexing*.py
+│   ├── lora_optimized_indexing.py
+│   └── lora_adapted_indexing.py
+├── GME Indexing
+│   ├── gme_optimized_batch_indexing.py
+│   └── gme_fast_gpu_indexing.py
+├── Utilities
+│   ├── prepare_images.py
+│   ├── lora_similarity_engine.py
+│   └── data_loader.py
+└── Shell Scripts
+    ├── run_delta_indexing.sh
+    ├── run_complete_indexing.sh
+    └── test_image_prep.sh
+```
+
+## Best Practices
+
+1. **For Updates**: Always use delta indexing for incremental changes
+2. **For Full Re-index**: Use multi-GPU optimized scripts
+3. **Image Prep**: Always resize to 512px before indexing
+4. **Testing**: Start with small subsets (100 images)
+5. **Monitoring**: Watch GPU utilization with `nvidia-smi`
+
+## Performance Comparison
+
+| Method | GPUs | Time (29K images) | Use Case |
+|--------|------|-------------------|----------|
+| Delta Indexing | 1-4 | 20-30 min (2K new) | Incremental updates |
+| LoRA Optimized | 4 | 2-3 hours | Full re-indexing |
+| GME Fast GPU | 4 | 2-3 hours | Alternative model |
+| Sequential | 1 | 13+ hours | Not recommended |
