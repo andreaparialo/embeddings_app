@@ -11,14 +11,13 @@ def main():
     """Main entry point"""
     # Get the absolute paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    parent_dir = os.path.dirname(script_dir)
     
-    # Check if required directories exist in parent directory
+    # Check if required directories exist in current directory
     required_dirs = ["database_results", "indexes", "loras", "pictures"]
     missing_dirs = []
     
     for dir_name in required_dirs:
-        dir_path = os.path.join(parent_dir, dir_name)
+        dir_path = os.path.join(script_dir, dir_name)
         if not os.path.exists(dir_path):
             missing_dirs.append(dir_name)
     
@@ -26,11 +25,11 @@ def main():
         print("❌ Missing required directories:")
         for dir_name in missing_dirs:
             print(f"   - {dir_name}")
-        print("\nPlease ensure all required directories are present in the parent directory.")
+        print("\nPlease ensure all required directories are present in the current directory.")
         sys.exit(1)
     
     # Check if CSV file exists
-    csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_20250625_155822.csv")
+    csv_path = os.path.join(script_dir, "database_results/final_with_aws_shapes_20250625_155822.csv")
     if not os.path.exists(csv_path):
         print(f"❌ CSV file not found: {csv_path}")
         sys.exit(1)
@@ -43,7 +42,7 @@ def main():
         "indexes/v11_o00_index.faiss"
     ]
     
-    if not any(os.path.exists(os.path.join(parent_dir, f)) for f in index_files):
+    if not any(os.path.exists(os.path.join(script_dir, f)) for f in index_files):
         print("❌ No FAISS index files found in indexes/ directory")
         sys.exit(1)
     
@@ -53,15 +52,12 @@ def main():
     print("🌐 Web interface will be available at: http://127.0.0.1:8080")
     print("⚡ GPU acceleration:", "enabled" if os.environ.get("CUDA_VISIBLE_DEVICES") != "-1" else "check your CUDA setup")
     
-    # Change to parent directory so the app can find all resources
-    os.chdir(parent_dir)
-    
-    # Add old_app to Python path so imports work correctly
-    sys.path.insert(0, script_dir)
+    # We're already in the correct directory
+    os.chdir(script_dir)
     
     # Start the server
     uvicorn.run(
-        "old_app.app:app",
+        "app:app",
         host="127.0.0.1",
         port=8080,
         reload=False,

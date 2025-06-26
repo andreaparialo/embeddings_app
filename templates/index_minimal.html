@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Search Engine (Minimal Mode)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .search-card { margin-bottom: 2rem; }
+        .result-card { margin-bottom: 1rem; }
+        .result-image { max-width: 150px; max-height: 150px; object-fit: cover; }
+        .filter-section { background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; }
+        .loading { display: none; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+        .disabled-section { opacity: 0.5; pointer-events: none; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-search me-2"></i>Product Search (Minimal Mode)
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text">
+                    {% if initialization_status.initialized %}
+                        <span class="badge bg-success">CSV Loaded</span>
+                    {% else %}
+                        <span class="badge bg-danger">Not Ready</span>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% if not initialization_status.initialized %}
+        <div class="alert alert-warning">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>System Status</h5>
+            <p>{{ initialization_status.message }}</p>
+        </div>
+        {% else %}
+        <div class="alert alert-info">
+            <h5><i class="fas fa-info-circle me-2"></i>Minimal Mode Active</h5>
+            <p>AI features are disabled. Only CSV-based search is available. Install AI dependencies to enable image search.</p>
+        </div>
+        {% endif %}
+
+        <!-- Search by SKU -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-barcode me-2"></i>Search by SKU</h5>
+            </div>
+            <div class="card-body">
+                <form id="sku-search-form">
+                    <div class="mb-3">
+                        <label for="sku-input" class="form-label">SKU Code:</label>
+                        <input type="text" class="form-control" id="sku-input" name="sku_cod" placeholder="Enter SKU code" required>
+                    </div>
+                    <button type="submit" class="btn btn-success" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-search me-2"></i>Search SKU
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Batch Search by Excel -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-file-excel me-2"></i>Basic Batch Search by Excel</h5>
+            </div>
+            <div class="card-body">
+                <form id="excel-search-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="excel-file" class="form-label">Upload Excel File (SKU codes in first column):</label>
+                        <input class="form-control" type="file" id="excel-file" name="file" accept=".xlsx,.xls" required>
+                    </div>
+                    <button type="submit" class="btn btn-info" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-upload me-2"></i>Upload & Search
+                    </button>
+                </form>
+                <div class="alert alert-info mt-3">
+                    <small><strong>Note:</strong> Enhanced batch search with image similarity, column matching, unisex grouping, dual-engine mode, and model exclusion options is available in full mode.</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search by Filters Only -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-filter me-2"></i>Search by Filters</h5>
+            </div>
+            <div class="card-body">
+                <form id="filter-search-form">
+                    <div class="filter-section">
+                        <div id="filter-controls"></div>
+                    </div>
+                    <button type="submit" class="btn btn-warning" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-search me-2"></i>Search by Filters
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- DISABLED SECTIONS -->
+        <div class="disabled-section">
+            <div class="card search-card">
+                <div class="card-header">
+                    <h5><i class="fas fa-camera me-2"></i>Search by Image <span class="badge bg-secondary">Disabled</span></h5>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted">Image search requires AI dependencies. Install torch, transformers, faiss-cpu, etc.</p>
+                    <input class="form-control" type="file" disabled>
+                    <button class="btn btn-primary mt-2" disabled>
+                        <i class="fas fa-search me-2"></i>Search by Image
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div class="text-center loading" id="loading">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Searching...</p>
+        </div>
+
+        <!-- Results -->
+        <div id="results-container" style="display: none;">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-list me-2"></i>Search Results</h5>
+                    <span id="results-count" class="badge bg-primary"></span>
+                </div>
+                <div class="card-body">
+                    <div id="results-grid" class="result-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize filter options
+        const filterOptions = {{ filter_options | tojson }};
+        
+        // Create filter controls
+        function createFilterControls() {
+            const container = document.getElementById('filter-controls');
+            container.innerHTML = '';
+            
+            for (const [column, options] of Object.entries(filterOptions)) {
+                const div = document.createElement('div');
+                div.className = 'mb-2';
+                
+                const label = document.createElement('label');
+                label.className = 'form-label';
+                label.textContent = column.replace(/_/g, ' ');
+                
+                // Always create dropdown for all filters
+                const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
+                select.name = column;
+                
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- All --';
+                select.appendChild(defaultOption);
+                
+                options.forEach(option => {
+                    const opt = document.createElement('option');
+                    opt.value = option;
+                    opt.textContent = option;
+                    select.appendChild(opt);
+                });
+                
+                div.appendChild(label);
+                div.appendChild(select);
+                
+                container.appendChild(div);
+            }
+        }
+        
+        // Initialize filters
+        createFilterControls();
+        
+        // Utility functions
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results-container').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function showResults(results, count) {
+            hideLoading();
+            const container = document.getElementById('results-container');
+            const grid = document.getElementById('results-grid');
+            const countBadge = document.getElementById('results-count');
+            
+            countBadge.textContent = `${count} results`;
+            grid.innerHTML = '';
+            
+            results.forEach(result => {
+                const card = createResultCard(result);
+                grid.appendChild(card);
+            });
+            
+            container.style.display = 'block';
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function createResultCard(result) {
+            const card = document.createElement('div');
+            card.className = 'card result-card';
+            
+            let imageHtml = '';
+            if (result.image_path) {
+                imageHtml = `<img src="/${result.image_path}" class="card-img-top result-image" alt="Product Image" onerror="this.style.display='none'">`;
+            }
+            
+            card.innerHTML = `
+                ${imageHtml}
+                <div class="card-body">
+                    <h6 class="card-title">${result.SKU_COD || 'N/A'}</h6>
+                    <p class="card-text">
+                        <strong>Brand:</strong> ${result.BRAND_DES || 'N/A'}<br>
+                        <strong>Gender:</strong> ${result.USERGENDER_DES || 'N/A'}<br>
+                        <strong>Color:</strong> ${result.COLOR_FAMILY_1_DES || 'N/A'}<br>
+                        <strong>Price:</strong> ${result.ACT_SKU_PRICE_VAL || 'N/A'}
+                    </p>
+                    <small class="text-muted">Filename: ${result.filename_root || 'N/A'}</small>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function collectFilters(formElement) {
+            const filters = {};
+            const formData = new FormData(formElement);
+            
+            for (const [key, value] of formData.entries()) {
+                if (value.trim() !== '') {
+                    filters[key] = value;
+                }
+            }
+            
+            return filters;
+        }
+        
+        // Event handlers
+        document.getElementById('sku-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch('/api/search/sku', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    if (result.result) {
+                        showResults([result.result], 1);
+                    } else {
+                        alert('SKU not found');
+                        hideLoading();
+                    }
+                } else {
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('excel-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch('/api/search/sku-batch', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResults(result.results, result.found_skus);
+                    alert(`Found ${result.found_skus} out of ${result.total_skus} SKUs`);
+                } else {
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('filter-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const filters = collectFilters(document.getElementById('filter-controls'));
+            const formData = new FormData();
+            formData.append('filters', JSON.stringify(filters));
+            
+            try {
+                const response = await fetch('/api/search/filters', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResults(result.results, result.count);
+                } else {
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+    </script>
+</body>
+</html> 

@@ -13,7 +13,8 @@ from threading import Lock
 import torch
 from collections import defaultdict
 import time
-from old_app.optimized_faiss_search import OptimizedFAISSSearch
+from optimized_faiss_search import OptimizedFAISSSearch
+import config_filtering
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,15 @@ class OptimizedBatchProcessor:
         logger.info(f"📊 Processing {len(image_groups)} unique images")
         logger.info(f"🔧 Matching columns: {matching_cols}")
         
+        # Define which columns to use for pre-filtering vs post-filtering
+        prefilter_columns = config_filtering.get_prefilter_columns()
+        # IMPORTANT: Only columns that are BOTH in PREFILTER_COLUMNS AND selected in the UI 
+        # as matching columns will be used for pre-filtering
+        prefilter_columns = [col for col in prefilter_columns if col in matching_cols]
+        
+        logger.info(f"🔍 Pre-filter columns (applied before similarity search): {prefilter_columns}")
+        logger.info(f"📋 Post-filter columns (applied after similarity search): {[col for col in matching_cols if col not in prefilter_columns]}")
+        
         # Prepare queries with their filters
         queries = []
         query_metadata = {}
@@ -62,32 +72,34 @@ class OptimizedBatchProcessor:
         for filename_root, group_data in image_groups.items():
             source_item = group_data['source_item']
             
-            # Build filters for this query based on matching columns
-            filters = {}
-            for col in matching_cols:
-                if col in source_item and source_item[col] is not None:
-                    filters[col] = source_item[col]
+            # CRITICAL FIX: Only use essential filters for pre-filtering
+            # The rest will be applied AFTER similarity search
+            prefilters = {}
+            for col in prefilter_columns:
+                if col in matching_cols and col in source_item and source_item[col] is not None:
+                    prefilters[col] = source_item[col]
             
-            # Add status filter if specified
-            if allowed_statuses:
-                filters['MD_SKU_STATUS_COD'] = allowed_statuses
+            # Note: Status filter is now a baseline filter applied automatically in FAISS search
+            # No need to add it to prefilters
             
             # Handle gender filtering for unisex grouping
-            if group_unisex and 'USERGENDER_DES' in filters:
-                source_gender = filters['USERGENDER_DES']
+            if group_unisex and 'USERGENDER_DES' in prefilters:
+                source_gender = prefilters['USERGENDER_DES']
                 if source_gender in ['MAN', 'WOMAN']:
-                    filters['USERGENDER_DES'] = [source_gender, 'UNISEX ADULT']
+                    prefilters['USERGENDER_DES'] = [source_gender, 'UNISEX ADULT']
             
             # Get embedding
             embedding = self._get_embedding_for_filename(filename_root)
             if embedding is not None:
                 query_id = f"query_{len(queries)}"
-                queries.append((query_id, embedding, filters))
+                queries.append((query_id, embedding, prefilters))
                 query_metadata[query_id] = {
                     'filename_root': filename_root,
                     'group_data': group_data,
                     'source_item': source_item,
-                    'exclude_model': source_item.get('MODEL_COD') if exclude_same_model else None
+                    'exclude_model': source_item.get('MODEL_COD') if exclude_same_model else None,
+                    'postfilter_columns': [col for col in matching_cols if col not in prefilter_columns],  # Store columns for post-filtering
+                    'all_filters': {col: source_item.get(col) for col in matching_cols if col in source_item}  # Store all filters for post-processing
                 }
         
         logger.info(f"📋 Prepared {len(queries)} queries for batch search")
@@ -134,9 +146,15 @@ class OptimizedBatchProcessor:
             filename_root = metadata['filename_root']
             group_data = metadata['group_data']
             exclude_model = metadata['exclude_model']
+            postfilter_columns = metadata['postfilter_columns']
+            all_filters = metadata['all_filters']
             
             # Convert embedding indices to full results
             similar_items = []
+            items_before_postfilter = 0
+            items_filtered_out = 0
+            
+            # Get more results initially to account for post-filtering
             for distance, embedding_idx in result_indices:
                 if embedding_idx >= 0:
                     # Convert embedding index back to filename_root
@@ -157,7 +175,56 @@ class OptimizedBatchProcessor:
                             if exclude_model and item.get('MODEL_COD') == exclude_model:
                                 continue
                             
-                            similar_items.append(item)
+                            items_before_postfilter += 1
+                            
+                            # CRITICAL: Apply post-filters here
+                            skip_item = False
+                            for col in postfilter_columns:
+                                if col in all_filters and all_filters[col] is not None:
+                                    item_value = item.get(col)
+                                    filter_value = all_filters[col]
+                                    
+                                    # Check if this column should use range filtering
+                                    if config_filtering.is_range_filter_column(col):
+                                        # Range-based filtering for numeric columns
+                                        min_val, max_val = config_filtering.get_range_bounds(filter_value, col)
+                                        if min_val is not None and max_val is not None:
+                                            try:
+                                                # Handle European decimal format (comma instead of dot)
+                                                if isinstance(item_value, str):
+                                                    item_value = item_value.replace(',', '.')
+                                                item_numeric = float(item_value)
+                                                
+                                                if not (min_val <= item_numeric <= max_val):
+                                                    # Debug logging for range filter mismatches
+                                                    if col == 'FRONT_HEIGHT_VAL' and abs(item_numeric - filter_value) / filter_value > 0.2:
+                                                        logger.debug(f"Range filter mismatch on {col}: source={filter_value}, item={item_numeric}, range=[{min_val:.2f}, {max_val:.2f}]")
+                                                    skip_item = True
+                                                    break
+                                            except (ValueError, TypeError) as e:
+                                                # If can't convert to numeric, skip
+                                                logger.debug(f"Failed to convert {col} value '{item_value}' to numeric: {e}")
+                                                skip_item = True
+                                                break
+                                    else:
+                                        # Handle different comparison types
+                                        if pd.isna(item_value) and pd.isna(filter_value):
+                                            continue  # Both NaN, consider as match
+                                        elif pd.isna(item_value) or pd.isna(filter_value):
+                                            skip_item = True  # One is NaN, other isn't
+                                            break
+                                        else:
+                                            # Normalize strings for comparison - remove trailing spaces and compare case-insensitive
+                                            item_str = str(item_value).strip().upper()
+                                            filter_str = str(filter_value).strip().upper()
+                                            if item_str != filter_str:
+                                                skip_item = True
+                                                break
+                            
+                            if not skip_item:
+                                similar_items.append(item)
+                            else:
+                                items_filtered_out += 1
                             
                             if len(similar_items) >= max_results_per_sku:
                                 break
@@ -167,9 +234,17 @@ class OptimizedBatchProcessor:
                 if len(similar_items) >= max_results_per_sku:
                     break
             
+            # Debug: Log how many items passed post-filtering
+            if postfilter_columns:
+                if items_filtered_out > 0 or len(similar_items) < 20:
+                    logger.info(f"Image {filename_root}: {items_before_postfilter} → {len(similar_items)} items (filtered out {items_filtered_out} by post-filters: {postfilter_columns})")
+            
             # Format results for all SKUs in this group
             for input_sku in group_data['skus']:
                 for similar_item in similar_items:
+                    # Note: Baseline filters (date and status) are already applied in the FAISS search
+                    # No need to filter here again
+                    
                     result_row = {
                         'Input_SKU': input_sku,
                         'Similar_SKU': similar_item.get('SKU_COD', ''),
@@ -197,6 +272,13 @@ class OptimizedBatchProcessor:
         logger.info(f"✅ Optimized batch processing complete in {total_time:.1f} seconds")
         logger.info(f"⚡ Performance: {len(image_groups)/total_time:.1f} images/sec")
         logger.info(f"📊 Total results: {len(all_results)}")
+        
+        # Log baseline filters that are active
+        logger.info("🛡️ Baseline filters (applied to all searches):")
+        if config_filtering.ENABLE_BASELINE_STATUS_FILTER:
+            logger.info(f"  ✅ Status filter: Only including {config_filtering.BASELINE_STATUS_CODES}")
+        if config_filtering.ENABLE_BASELINE_DATE_FILTER:
+            logger.info(f"  🚫 Date filter: Excluding {config_filtering.BASELINE_EXCLUDE_YEARS} years and {config_filtering.BASELINE_EXCLUDE_DATES} dates")
         
         # Show cache stats
         cache_stats = self.optimized_search.get_cache_stats()

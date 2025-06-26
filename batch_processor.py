@@ -14,6 +14,7 @@ from threading import Lock
 import torch
 from collections import defaultdict
 import time
+import config_filtering
 
 logger = logging.getLogger(__name__)
 
@@ -249,10 +250,48 @@ class BatchImageProcessor:
         
         # Filter by matching columns
         if matching_filters:
-            filtered_results = [
-                item for item in filtered_results
-                if all(item.get(col) == val for col, val in matching_filters.items())
-            ]
+            new_filtered_results = []
+            for item in filtered_results:
+                match = True
+                for col, val in matching_filters.items():
+                    item_value = item.get(col)
+                    
+                    # Check if this column should use range filtering
+                    if config_filtering.is_range_filter_column(col):
+                        # Range-based filtering for numeric columns
+                        min_val, max_val = config_filtering.get_range_bounds(val, col)
+                        if min_val is not None and max_val is not None:
+                            try:
+                                # Handle European decimal format (comma instead of dot)
+                                if isinstance(item_value, str):
+                                    item_value = item_value.replace(',', '.')
+                                item_numeric = float(item_value)
+                                if not (min_val <= item_numeric <= max_val):
+                                    match = False
+                                    break
+                            except (ValueError, TypeError):
+                                # If can't convert to numeric, no match
+                                match = False
+                                break
+                    else:
+                        # Handle NaN values
+                        if pd.isna(val) and pd.isna(item_value):
+                            continue  # Both NaN, consider as match
+                        elif pd.isna(val) or pd.isna(item_value):
+                            match = False  # One is NaN, other isn't
+                            break
+                        else:
+                            # Normalize strings for comparison - remove trailing spaces and compare case-insensitive
+                            item_str = str(item_value).strip().upper()
+                            filter_str = str(val).strip().upper()
+                            if item_str != filter_str:
+                                match = False
+                                break
+                
+                if match:
+                    new_filtered_results.append(item)
+            
+            filtered_results = new_filtered_results
             if initial_count > 0:
                 logger.debug(f"   Matching columns filter: {initial_count} → {len(filtered_results)} items")
         
@@ -298,6 +337,9 @@ class BatchImageProcessor:
             sku_source_item = group_data.get('sku_to_source', {}).get(input_sku, source_item)
             
             for similar_item in filtered_results:
+                # Note: Baseline filters (date and status) are already applied in the FAISS search
+                # No need to filter here again
+                
                 result_row = {
                     'Input_SKU': input_sku,
                     'Similar_SKU': similar_item.get('SKU_COD', ''),
@@ -314,13 +356,10 @@ class BatchImageProcessor:
         return formatted_results
     
     def _get_image_path(self, filename_root: str) -> str:
-        """Get image path for filename_root"""
-        import os
-        for ext in ['.jpg', '.JPG']:
-            path = f"pictures/{filename_root}_O00{ext}"
-            if os.path.exists(path):
-                return path
-        return None
+        """Get the image path for a filename_root"""
+        # Use data_loader's implementation which handles path normalization
+        path = self.data_loader.get_image_path(filename_root)
+        return path if path else ""
 
 # Global instance will be created when needed
 batch_processor = None 

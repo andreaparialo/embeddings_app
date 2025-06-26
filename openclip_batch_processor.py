@@ -19,7 +19,7 @@ class OpenCLIPBatchProcessor:
         self.thread_local = threading.local()
         
         # Initialize optimized search for pre-filtering
-        from old_app.optimized_faiss_search import OptimizedFAISSSearch
+        from optimized_faiss_search import OptimizedFAISSSearch
         self.optimized_search = OptimizedFAISSSearch(
             index=openclip_data_loader.index,
             embeddings=openclip_data_loader.embeddings,

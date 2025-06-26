@@ -7,6 +7,7 @@ import json
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
+import config_filtering
 
 logger = logging.getLogger(__name__)
 
@@ -29,39 +30,78 @@ class OptimizedFAISSSearch:
         self.total_items = len(self.df)
         self.embeddings_count = len(self.embeddings)
         
+        # Pre-compute baseline mask to avoid recalculating
+        self._compute_baseline_mask()
+        
         logger.info(f"Initialized OptimizedFAISSSearch:")
         logger.info(f"  - DataFrame items: {self.total_items}")
         logger.info(f"  - Embeddings count: {self.embeddings_count}")
         logger.info(f"  - Filename mappings: {len(self.filename_to_idx)}")
+        logger.info(f"  - Items after baseline filters: {self.baseline_mask.sum()}")
         
         if self.total_items != self.embeddings_count:
             logger.warning(f"⚠️ DataFrame ({self.total_items}) and embeddings ({self.embeddings_count}) size mismatch!")
             logger.warning("  This is expected if DataFrame contains SKUs and embeddings are per filename_root")
+    
+    def _compute_baseline_mask(self):
+        """Pre-compute baseline filter mask for efficiency"""
+        self.baseline_mask = pd.Series([True] * len(self.df), index=self.df.index)
         
+        # Apply baseline status filter
+        if config_filtering.ENABLE_BASELINE_STATUS_FILTER and config_filtering.BASELINE_STATUS_CODES:
+            if 'MD_SKU_STATUS_COD' in self.df.columns:
+                self.baseline_mask &= self.df['MD_SKU_STATUS_COD'].isin(config_filtering.BASELINE_STATUS_CODES)
+                logger.info(f"Applied baseline status filter: {self.baseline_mask.sum()} items remain")
+        
+        # Apply baseline date filter
+        if config_filtering.ENABLE_BASELINE_DATE_FILTER:
+            if 'STARTSKU_DATE' in self.df.columns:
+                date_mask = ~self.df['STARTSKU_DATE'].apply(config_filtering.should_exclude_by_baseline_date)
+                self.baseline_mask &= date_mask
+                logger.info(f"Applied baseline date filter: {self.baseline_mask.sum()} items remain")
+    
     def get_filtered_indices(self, filters: Dict) -> np.ndarray:
         """Get EMBEDDING indices of items that pass all filters"""
-        if not filters:
-            # Return all embedding indices
-            return np.arange(self.embeddings_count)
-        
-        # Create cache key
-        cache_key = json.dumps(filters, sort_keys=True)
+        # Create cache key including baseline filter state
+        baseline_key = f"baseline_{config_filtering.ENABLE_BASELINE_STATUS_FILTER}_{config_filtering.ENABLE_BASELINE_DATE_FILTER}"
+        cache_key = f"{baseline_key}_{json.dumps(filters, sort_keys=True)}"
         
         # Check cache
         if cache_key in self.filter_cache:
             return self.filter_cache[cache_key]
         
-        # Apply filters to dataframe
-        mask = pd.Series([True] * len(self.df), index=self.df.index)
+        # Start with baseline mask
+        mask = self.baseline_mask.copy()
         
-        for col, value in filters.items():
-            if col in self.df.columns:
-                if value is not None and value != '':
-                    # Handle different types of filtering
-                    if isinstance(value, list):
-                        mask &= self.df[col].isin(value)
-                    else:
-                        mask &= (self.df[col] == value)
+        # Apply additional filters
+        if filters:
+            for col, value in filters.items():
+                if col in self.df.columns:
+                    if value is not None and value != '':
+                        # Check if this column should use range filtering
+                        if config_filtering.is_range_filter_column(col):
+                            # Range-based filtering for numeric columns
+                            min_val, max_val = config_filtering.get_range_bounds(value, col)
+                            if min_val is not None and max_val is not None:
+                                # Apply range filter - handle comma decimal format
+                                col_values = self.df[col].copy()
+                                # Replace commas with dots for European decimal format
+                                if col_values.dtype == 'object':
+                                    col_values = col_values.str.replace(',', '.', regex=False)
+                                col_values = pd.to_numeric(col_values, errors='coerce')
+                                mask &= (col_values >= min_val) & (col_values <= max_val)
+                                logger.debug(f"Applied range filter on {col}: {value} → [{min_val:.2f}, {max_val:.2f}]")
+                        elif isinstance(value, list):
+                            # Handle different types of filtering
+                            # Normalize list values for comparison
+                            normalized_values = [str(v).strip().upper() for v in value]
+                            # Compare with normalized column values
+                            mask &= self.df[col].fillna('').astype(str).str.strip().str.upper().isin(normalized_values)
+                        else:
+                            # Single value comparison with normalization
+                            normalized_value = str(value).strip().upper()
+                            # Compare with normalized column values
+                            mask &= (self.df[col].fillna('').astype(str).str.strip().str.upper() == normalized_value)
         
         # Get filtered dataframe
         filtered_df = self.df[mask]
@@ -126,7 +166,8 @@ class OptimizedFAISSSearch:
         query_embedding = query_embedding.astype(np.float32)
         
         # If we're filtering out most items, create a temporary index
-        filter_ratio = len(valid_indices) / self.total_items
+        # Use embeddings_count instead of total_items for accurate ratio
+        filter_ratio = len(valid_indices) / self.embeddings_count
         
         # For GPU indexes, prefer subset index for very selective filters to avoid k-limit issues
         gpu_index = hasattr(self.index, '__class__') and 'Gpu' in str(self.index.__class__)
@@ -162,6 +203,12 @@ class OptimizedFAISSSearch:
         # Adjust top_k if necessary
         search_k = min(top_k, len(valid_indices))
         
+        # Safety check - log if search_k is suspiciously large
+        if search_k > 1000:
+            logger.warning(f"Large search_k requested: {search_k} (top_k={top_k}, valid_indices={len(valid_indices)})")
+            # Cap it to something reasonable
+            search_k = min(search_k, 1000)
+        
         # Check if index supports search_preassigned
         if hasattr(self.index, 'search_preassigned'):
             # IVF index
@@ -180,15 +227,41 @@ class OptimizedFAISSSearch:
             )
         else:
             # For other index types, use regular search with post-filtering
-            # Search for more to ensure we get enough valid results
-            search_multiplier = max(3, int(self.total_items / len(valid_indices)))
-            temp_k = min(search_k * search_multiplier, self.total_items)
-            
-            # GPU indexes have a limit of 2048 for k-selection
+            # GPU indexes have a hard limit of 2048 for k-selection
             gpu_max_k = 2048
-            if hasattr(self.index, '__class__') and 'Gpu' in str(self.index.__class__):
-                temp_k = min(temp_k, gpu_max_k)
-                logger.debug(f"GPU index detected, limiting k to {temp_k}")
+            is_gpu_index = hasattr(self.index, '__class__') and ('Gpu' in str(self.index.__class__) or 'gpu' in str(self.index.__class__).lower())
+            is_sharded = hasattr(self.index, '__class__') and 'Shard' in str(self.index.__class__)
+            
+            if is_sharded:
+                logger.debug(f"Detected sharded index: {self.index.__class__}")
+            
+            # Calculate a reasonable search multiplier
+            # Don't use total_items for calculation as it can lead to huge numbers
+            if len(valid_indices) > 0:
+                # Aim to search 3x the requested amount, but cap it reasonably
+                search_multiplier = min(3, max(1.5, 1000 / len(valid_indices)))
+            else:
+                search_multiplier = 3
+            
+            # Calculate temp_k with proper limits
+            temp_k = int(search_k * search_multiplier)
+            
+            # Apply strict limits
+            if is_gpu_index or is_sharded:
+                # Be extra conservative with GPU/sharded indexes
+                temp_k = min(temp_k, gpu_max_k - 100)  # Leave some buffer
+                logger.debug(f"GPU/Sharded index detected, limiting k to {temp_k} (requested: {search_k}, valid_indices: {len(valid_indices)})")
+            else:
+                # Even for CPU, don't go crazy with the search size
+                temp_k = min(temp_k, 10000)
+            
+            # Ensure temp_k is at least search_k but never exceeds valid_indices
+            temp_k = max(temp_k, min(search_k, len(valid_indices)))
+            
+            # Final safety check - NEVER exceed GPU limit for any index type
+            if (is_gpu_index or is_sharded) and temp_k > gpu_max_k:
+                logger.warning(f"temp_k ({temp_k}) exceeds GPU limit ({gpu_max_k}), forcing to {gpu_max_k - 100})")
+                temp_k = gpu_max_k - 100  # Leave buffer to be safe
             
             D_temp, I_temp = self.index.search(query_embedding, temp_k)
             

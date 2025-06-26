@@ -23,27 +23,30 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(title="OpenCLIP Product Search Engine", version="1.0.0")
 
-# Create directories if they don't exist
-os.makedirs("uploads", exist_ok=True)
+# Get the base paths
+app_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = app_dir  # Resources are now in the same directory
 
-# Mount static files - use parent directory's static folder
-static_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static")
+# Create directories if they don't exist
+os.makedirs(os.path.join(app_dir, "uploads"), exist_ok=True)
+
+# Mount static files - use parent directory's static folder  
+static_path = os.path.join(parent_dir, "static")
 if os.path.exists(static_path):
     app.mount("/static", StaticFiles(directory=static_path), name="static")
 else:
     # Create local static directory if parent doesn't exist
-    os.makedirs("static", exist_ok=True)
-    app.mount("/static", StaticFiles(directory="static"), name="static")
+    os.makedirs(os.path.join(app_dir, "static"), exist_ok=True)
+    app.mount("/static", StaticFiles(directory=os.path.join(app_dir, "static")), name="static")
 # Use the parent directory's pictures folder
-pictures_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pictures")
+pictures_path = os.path.join(parent_dir, "pictures")
 if os.path.exists(pictures_path):
     app.mount("/pictures", StaticFiles(directory=pictures_path, follow_symlink=True), name="pictures")
 else:
     logger.warning(f"Pictures directory not found at {pictures_path}")
 
-# Setup templates - use parent directory's templates
-templates_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "templates")
-templates = Jinja2Templates(directory=templates_path)
+# Setup templates - use local templates directory
+templates = Jinja2Templates(directory=os.path.join(app_dir, "templates"))
 
 # Global variables
 INITIALIZATION_STATUS = {"initialized": False, "message": "Not initialized"}
@@ -65,32 +68,41 @@ def sanitize_json_data(data):
         return data
 
 def get_image_path(filename_root):
-    """Get the correct image path, handling both .JPG and .jpg extensions"""
-    if not filename_root:
-        return None
+    """Get image path for display in the UI"""
+    # Check if openclip_data_loader has a mapping for this filename_root
+    if filename_root in openclip_data_loader.filename_to_idx:
+        idx = openclip_data_loader.filename_to_idx[filename_root]
+        if idx < len(openclip_data_loader.metadata.get('image_paths', [])):
+            image_path = openclip_data_loader.metadata['image_paths'][idx]
+            filename = os.path.basename(image_path)
+            # Check if file exists in ../pictures/
+            full_path = os.path.join(parent_dir, 'pictures', filename)
+            if os.path.exists(full_path):
+                return f"/pictures/{filename}"
     
-    # Get the parent directory's pictures folder
-    pictures_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pictures")
+    # Fallback to direct search in pictures directory
+    for ext in ['.jpg', '.JPG']:
+        # Try with _O00 suffix
+        filename = f"{filename_root}_O00{ext}"
+        path = os.path.join(parent_dir, 'pictures', filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
+        
+        # Try without suffix
+        filename = f"{filename_root}{ext}"
+        path = os.path.join(parent_dir, 'pictures', filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
     
-    # Try both .JPG and .jpg extensions
-    image_path_jpg_upper = os.path.join(pictures_dir, f"{filename_root}_O00.JPG")
-    image_path_jpg_lower = os.path.join(pictures_dir, f"{filename_root}_O00.jpg")
-    
-    # Return the path relative to the mount point for web serving
-    if os.path.exists(image_path_jpg_upper):
-        return f"/pictures/{filename_root}_O00.JPG"
-    elif os.path.exists(image_path_jpg_lower):
-        return f"/pictures/{filename_root}_O00.jpg"
-    else:
-        return None
+    return None
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize the OpenCLIP search engine on startup"""
     global INITIALIZATION_STATUS
     try:
-        csv_path = "/home/ubuntu/SPEEDINGTHEPROCESS/database_results/final_with_aws_shapes_20250625_155822.csv"
-        index_dir = "/home/ubuntu/SPEEDINGTHEPROCESS/indexes/openclip"
+        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_20250625_155822.csv")
+        index_dir = os.path.join(parent_dir, "indexes/openclip")
         checkpoint = "epoch_008_model.pth"  # Default checkpoint
         
         if openclip_search_engine.initialize(csv_path, index_dir, checkpoint):
@@ -169,7 +181,7 @@ async def search_by_image(
         # Save uploaded file temporarily
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"temp_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving to: {temp_path}")
         try:
@@ -283,7 +295,7 @@ async def search_by_sku_batch(file: UploadFile = File(...)):
         # Save uploaded file temporarily  
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"batch_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving Excel file to: {temp_path}")
         with open(temp_path, "wb") as buffer:
@@ -371,7 +383,7 @@ async def enhanced_batch_search(
         # Save uploaded file temporarily  
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"enhanced_batch_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving Excel file to: {temp_path}")
         with open(temp_path, "wb") as buffer:

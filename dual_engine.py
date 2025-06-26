@@ -2,9 +2,9 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple
 import logging
-from old_app.data_loader import DataLoader
-from old_app.gme_model import GMEModel
-from old_app.search_engine import HybridSearchEngine
+from data_loader import DataLoader
+from gme_model import GMEModel
+from search_engine import HybridSearchEngine
 
 logger = logging.getLogger(__name__)
 

@@ -8,12 +8,13 @@ import tempfile
 import shutil
 from typing import Dict, List, Optional
 import logging
-from old_app.search_engine import search_engine
-from old_app.data_loader import data_loader
-from old_app.dual_engine import dual_engine
-from old_app.gme_model import gme_model
+from search_engine import search_engine
+from data_loader import data_loader
+from dual_engine import dual_engine
+from gme_model import gme_model
 import json
 import math
+import time
 from datetime import datetime
 
 # Setup logging
@@ -23,17 +24,21 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(title="Hybrid Product Search Engine", version="1.0.0")
 
+# Get the base paths
+app_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = app_dir  # Resources are now in the same directory
+
 # Create directories if they don't exist
-os.makedirs("static", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
+os.makedirs(os.path.join(app_dir, "static"), exist_ok=True)
+os.makedirs(os.path.join(app_dir, "templates"), exist_ok=True)
+os.makedirs(os.path.join(app_dir, "uploads"), exist_ok=True)
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/pictures", StaticFiles(directory="pictures", follow_symlink=True), name="pictures")
+app.mount("/static", StaticFiles(directory=os.path.join(app_dir, "static")), name="static")
+app.mount("/pictures", StaticFiles(directory=os.path.join(parent_dir, "pictures"), follow_symlink=True), name="pictures")
 
 # Setup templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=os.path.join(app_dir, "templates"))
 
 # Global variables
 INITIALIZATION_STATUS = {"initialized": False, "message": "Not initialized"}
@@ -55,20 +60,30 @@ def sanitize_json_data(data):
         return data
 
 def get_image_path(filename_root):
-    """Get the correct image path, handling both .JPG and .jpg extensions"""
-    if not filename_root:
-        return None
+    """Get image path for display in the UI"""
+    # Check if data_loader has a mapping for this filename_root
+    if hasattr(data_loader, 'get_image_path'):
+        path = data_loader.get_image_path(filename_root)
+        if path and os.path.exists(path):
+            # Convert to web-accessible path
+            return f"/pictures/{os.path.basename(path)}"
     
-    # Try both .JPG and .jpg extensions
-    image_path_jpg_upper = f"pictures/{filename_root}_O00.JPG"
-    image_path_jpg_lower = f"pictures/{filename_root}_O00.jpg"
+    # Fallback to direct search in pictures directory
+    pictures_dir = os.path.join(app_dir, 'pictures')
+    for ext in ['.jpg', '.JPG']:
+        # Try with _O00 suffix
+        filename = f"{filename_root}_O00{ext}"
+        path = os.path.join(pictures_dir, filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
+        
+        # Try without suffix
+        filename = f"{filename_root}{ext}"
+        path = os.path.join(pictures_dir, filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
     
-    if os.path.exists(image_path_jpg_upper):
-        return image_path_jpg_upper
-    elif os.path.exists(image_path_jpg_lower):
-        return image_path_jpg_lower
-    else:
-        return None
+    return None
 
 def derive_filename_root_from_sku(sku_cod, product_type=None):
     """
@@ -219,10 +234,12 @@ async def startup_event():
             except Exception as e:
                 logger.debug(f"Could not check FAISS installation: {e}")
         
-        csv_path = "database_results/final_with_aws_shapes_20250625_155822.csv"
+        # Use enriched database with shape information from final_for_similarity.csv
+        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
         if search_engine.initialize(csv_path):
             INITIALIZATION_STATUS = {"initialized": True, "message": "Search engine initialized successfully"}
             logger.info("Search engine initialized on startup")
+            logger.info("💡 Note: GME model will be loaded only when image search is used (lazy loading)")
         else:
             INITIALIZATION_STATUS = {"initialized": False, "message": "Failed to initialize search engine"}
     except Exception as e:
@@ -292,7 +309,7 @@ async def search_by_image(
         # Save uploaded file temporarily
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"temp_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving to: {temp_path}")
         try:
@@ -403,7 +420,7 @@ async def search_by_sku_batch(file: UploadFile = File(...)):
         # Save uploaded file temporarily  
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"batch_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving Excel file to: {temp_path}")
         with open(temp_path, "wb") as buffer:
@@ -450,6 +467,176 @@ async def search_by_sku_batch(file: UploadFile = File(...)):
         logger.error(f"❌ Error in batch search endpoint: {e}")
         return {"error": str(e)}
 
+@app.post("/search/batch-filter-only")
+async def filter_only_batch_search(
+    file: UploadFile = File(...),
+    matching_columns: str = Form(...),
+    exclude_same_model: bool = Form(False),
+    allowed_status_codes: str = Form('["IL"]')
+):
+    """
+    Filter-only batch search - matches SKUs based on column filters without image search
+    Much faster and returns ALL matches from database
+    """
+    try:
+        import json
+        matching_cols = json.loads(matching_columns) if matching_columns else []
+        allowed_statuses = json.loads(allowed_status_codes) if allowed_status_codes else ['IL']
+        
+        logger.info("📋 Filter-Only Batch Search Request")
+        logger.info(f"⚙️ Matching columns: {matching_cols}")
+        logger.info(f"⚙️ Exclude same model: {exclude_same_model}")
+        logger.info(f"⚙️ Allowed status codes: {allowed_statuses}")
+        
+        # Save uploaded file temporarily
+        temp_path = f"temp_filter_batch_{int(time.time())}.xlsx"
+        with open(temp_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+        
+        # Load input Excel
+        df_input = pd.read_excel(temp_path)
+        input_skus = df_input.iloc[:, 0].astype(str).str.strip().tolist()
+        logger.info(f"📊 Found {len(input_skus)} input SKUs")
+        
+        # Keep two dataframes: one unfiltered for finding input SKUs, one filtered for matching
+        df_unfiltered = data_loader.df.copy()
+        df_filtered = data_loader.df.copy()
+        initial_count = len(df_filtered)
+        
+        # Debug logging
+        logger.info(f"🔍 SKU_COD type in database: {df_filtered['SKU_COD'].dtype}")
+        logger.info(f"🔍 First few input SKUs: {input_skus[:5]}")
+        logger.info(f"🔍 First few database SKUs: {df_filtered['SKU_COD'].head().tolist()}")
+        
+        # Apply filters ONLY to the matching database, not to finding input SKUs
+        # Status filter
+        if allowed_statuses:
+            df_filtered = df_filtered[df_filtered['MD_SKU_STATUS_COD'].isin(allowed_statuses)]
+            logger.info(f"✅ Status filter: {initial_count:,} → {len(df_filtered):,} products")
+        
+        # Apply baseline date filters
+        import config_filtering
+        if config_filtering.ENABLE_BASELINE_DATE_FILTER:
+            date_mask = ~df_filtered['STARTSKU_DATE'].apply(config_filtering.should_exclude_by_baseline_date)
+            df_filtered = df_filtered[date_mask]
+            logger.info(f"✅ Date filter: {len(df_filtered):,} products remain")
+        
+        # Check how many of the input SKUs exist in the UNFILTERED database
+        df_unfiltered_upper = df_unfiltered['SKU_COD'].astype(str).str.strip().str.upper()
+        input_skus_upper = [str(sku).strip().upper() for sku in input_skus]
+        exists_in_unfiltered = df_unfiltered_upper.isin(input_skus_upper).sum()
+        logger.info(f"📊 Input SKUs that exist in unfiltered database: {exists_in_unfiltered}/{len(input_skus)}")
+        
+        # Find matches for each input SKU
+        all_results = []
+        skus_not_found = []
+        
+        # Convert database SKUs to uppercase for case-insensitive comparison
+        df_unfiltered['SKU_COD_UPPER'] = df_unfiltered['SKU_COD'].astype(str).str.strip().str.upper()
+        df_filtered['SKU_COD_UPPER'] = df_filtered['SKU_COD'].astype(str).str.strip().str.upper()
+        
+        for i, input_sku in enumerate(input_skus):
+            # Find the input SKU in UNFILTERED database (case-insensitive)
+            input_sku_upper = str(input_sku).strip().upper()
+            input_row = df_unfiltered[df_unfiltered['SKU_COD_UPPER'] == input_sku_upper]
+            
+            if input_row.empty:
+                skus_not_found.append(input_sku)
+                # Debug first few not found
+                if len(skus_not_found) <= 5:
+                    logger.warning(f"❌ SKU not found: '{input_sku}' → '{input_sku_upper}'")
+                    # Check if it exists without filtering
+                    exists_unfiltered = data_loader.df[data_loader.df['SKU_COD'].astype(str).str.strip().str.upper() == input_sku_upper]
+                    if not exists_unfiltered.empty:
+                        logger.warning(f"   → SKU exists in full database but was filtered out!")
+                        logger.warning(f"      Status: {exists_unfiltered.iloc[0]['MD_SKU_STATUS_COD']}")
+                        logger.warning(f"      Date: {exists_unfiltered.iloc[0]['STARTSKU_DATE']}")
+                continue
+            
+            # Get filter values from the input SKU
+            input_data = input_row.iloc[0]
+            
+            # Build filter mask - IMPORTANT: use the same index as df_filtered
+            mask = pd.Series([True] * len(df_filtered), index=df_filtered.index)
+            
+            # Apply each matching column filter
+            for col in matching_cols:
+                if col in df_filtered.columns and col in input_data:
+                    input_value = input_data[col]
+                    if pd.notna(input_value):
+                        # Input is not NaN, match exact value
+                        mask &= (df_filtered[col] == input_value)
+                    else:
+                        # Input is NaN, match rows where column is also NaN
+                        mask &= df_filtered[col].isna()
+            
+            # Apply exclude same model if requested
+            if exclude_same_model and 'MODEL_COD' in input_data:
+                input_model = input_data['MODEL_COD']
+                if pd.notna(input_model):
+                    mask &= (df_filtered['MODEL_COD'] != input_model)
+            
+            # Get matching products
+            matches = df_filtered[mask]
+            
+            # Create result rows
+            for _, match_row in matches.iterrows():
+                result = {
+                    'Input_SKU': input_sku,
+                    'Matched_SKU': match_row['SKU_COD'],
+                }
+                
+                # Add the matching column values for comparison
+                for col in matching_cols:
+                    result[f'Source_{col}'] = input_data.get(col, '')
+                    result[f'Matched_{col}'] = match_row.get(col, '')
+                
+                # Add additional columns
+                result['Matched_MODEL_COD'] = match_row.get('MODEL_COD', '')
+                result['Matched_STARTSKU_DATE'] = match_row.get('STARTSKU_DATE', '')
+                result['Matched_MD_SKU_STATUS_COD'] = match_row.get('MD_SKU_STATUS_COD', '')
+                
+                all_results.append(result)
+        
+        logger.info(f"✅ Filter matching complete:")
+        logger.info(f"   Total matches: {len(all_results):,}")
+        logger.info(f"   Input SKUs with matches: {len(set(r['Input_SKU'] for r in all_results)):,}")
+        if skus_not_found:
+            logger.info(f"   SKUs not found: {len(skus_not_found)}")
+        
+        # Clean up temp file
+        try:
+            os.remove(temp_path)
+        except:
+            pass
+        
+        # Create results DataFrame and Excel
+        if all_results:
+            results_df = pd.DataFrame(all_results)
+            
+            from io import BytesIO
+            output = BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                results_df.to_excel(writer, index=False, sheet_name='Filter_Match_Results')
+            
+            output.seek(0)
+            
+            from fastapi.responses import StreamingResponse
+            return StreamingResponse(
+                BytesIO(output.read()),
+                media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                headers={"Content-Disposition": "attachment; filename=filter_match_results.xlsx"}
+            )
+        else:
+            return {"error": "No matches found for any input SKUs"}
+            
+    except Exception as e:
+        logger.error(f"❌ Error in filter-only batch search: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"error": str(e)}
+
 @app.post("/search/batch-enhanced")
 async def enhanced_batch_search(
     file: UploadFile = File(...),
@@ -492,7 +679,8 @@ async def enhanced_batch_search(
         # Initialize dual engine if requested
         if dual_engine:
             logger.info("🚀 Initializing dual engine for this search...")
-            csv_path = "database_results/final_with_aws_shapes_20250625_155822.csv"
+            # Use enriched database with shape information from final_for_similarity.csv
+            csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
             if not dual_engine.initialize_dual_engine(csv_path, "680", "1095"):
                 logger.warning("⚠️ Dual engine initialization failed, falling back to single engine")
                 dual_engine_enabled = False
@@ -505,7 +693,7 @@ async def enhanced_batch_search(
         # Save uploaded file temporarily  
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         temp_filename = f"enhanced_batch_{timestamp}_{file.filename}"
-        temp_path = os.path.join("uploads", temp_filename)
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
         
         logger.info(f"💾 Saving Excel file to: {temp_path}")
         with open(temp_path, "wb") as buffer:
@@ -538,16 +726,32 @@ async def enhanced_batch_search(
         
         # Step 1: Find all exact SKU matches in ONE query
         logger.info("📊 Step 1: Bulk exact SKU match...")
-        exact_matches_df = data_loader.df[data_loader.df['SKU_COD'].isin(sku_list)]
+        # CRITICAL FIX: Convert SKU_COD to string for proper comparison
+        logger.info(f"   🔍 SKU_COD type in dataframe: {data_loader.df['SKU_COD'].dtype}")
+        logger.info(f"   🔍 First few SKUs from input: {sku_list[:3]}")
+        
+        # Convert both sides to uppercase strings for comparison
+        df_sku_upper = data_loader.df['SKU_COD'].astype(str).str.strip().str.upper()
+        sku_list_upper = [str(sku).strip().upper() for sku in sku_list]
+        
+        exact_matches_df = data_loader.df[df_sku_upper.isin(sku_list_upper)]
         logger.info(f"✅ Found {len(exact_matches_df)} exact SKU matches in bulk")
         
         # Process exact matches
         found_skus = set()
+        # Create a mapping from uppercase SKU to original input SKU
+        input_sku_map = {str(sku).strip().upper(): sku for sku in sku_list}
+        
         for _, row in exact_matches_df.iterrows():
-            sku = row['SKU_COD']
+            # Get the SKU from dataframe and normalize it
+            df_sku = str(row['SKU_COD']).strip().upper()
             source_item = row.to_dict()
-            sku_to_source[sku] = source_item
-            found_skus.add(sku)
+            
+            # Find the original input SKU that matches this dataframe SKU
+            if df_sku in input_sku_map:
+                original_input_sku = input_sku_map[df_sku]
+                sku_to_source[original_input_sku] = source_item
+                found_skus.add(original_input_sku)
             
             # Get filename_root
             filename_root = source_item.get('filename_root', '')
@@ -557,7 +761,8 @@ async def enhanced_batch_search(
                         'source_item': source_item,
                         'skus': []
                     }
-                sku_groups[filename_root]['skus'].append(sku)
+                # CRITICAL: Append the original input SKU, not the dataframe SKU
+                sku_groups[filename_root]['skus'].append(original_input_sku)
         
         # Step 2: Process missing SKUs - derive filename_roots in bulk
         missing_skus = [sku for sku in sku_list if sku not in found_skus]
@@ -666,9 +871,21 @@ async def enhanced_batch_search(
             if len(not_found) <= 5:
                 logger.info(f"      Missing: {', '.join(not_found)}")
         
-        # Add sku_to_source mapping to each group
+        # Add sku_to_source mapping to each group and debug
         for filename_root, group_data in sku_groups.items():
             group_data['sku_to_source'] = sku_to_source
+            
+            # DEBUG: Check if SKUs in the same group have the same STARTSKU_DATE
+            group_skus = group_data['skus']
+            if len(group_skus) > 1:
+                startsku_dates = []
+                for sku in group_skus:
+                    if sku in sku_to_source:
+                        date = sku_to_source[sku].get('STARTSKU_DATE', 'N/A')
+                        startsku_dates.append(date)
+                unique_dates = set(startsku_dates)
+                if len(unique_dates) == 1:
+                    logger.warning(f"⚠️ Image group {filename_root} has {len(group_skus)} SKUs all with same STARTSKU_DATE: {list(unique_dates)[0]}")
         
         # Check if we should use parallel processing
         use_parallel = len(sku_groups) > 10  # Use parallel for more than 10 images
@@ -678,8 +895,8 @@ async def enhanced_batch_search(
             logger.info("🚀 Using parallel batch processor for faster processing...")
             
                         # Initialize batch processor if needed
-            from old_app.batch_processor import BatchImageProcessor
-            from old_app.batch_processor_optimized import OptimizedBatchProcessor
+            from batch_processor import BatchImageProcessor
+            from batch_processor_optimized import OptimizedBatchProcessor
             
             # Use optimized processor with pre-filtering for better performance
             use_optimized = True  # Can make this configurable later
@@ -731,6 +948,15 @@ async def enhanced_batch_search(
                         if col in source_item:
                             matching_filters[col] = source_item[col]
                             logger.info(f"   🏷️ {col}: {source_item[col]}")
+                    
+                    # Debug: Log what columns are NOT being filtered
+                    all_columns = set(source_item.keys())
+                    filtered_columns = set(matching_filters.keys())
+                    not_filtered = all_columns - filtered_columns
+                    logger.info(f"   📊 Total columns in source: {len(all_columns)}")
+                    logger.info(f"   ✅ Filtering on: {list(filtered_columns)}")
+                    if 'STARTSKU_DATE' in not_filtered:
+                        logger.info(f"   ❌ NOT filtering on STARTSKU_DATE (value: {source_item.get('STARTSKU_DATE', 'N/A')})")
                     
                     # Apply unisex grouping logic if enabled
                     if group_unisex and 'USERGENDER_DES' in matching_filters:
@@ -786,6 +1012,14 @@ async def enhanced_batch_search(
                             )
                     
                     logger.info(f"   🎯 Found {len(similar_results)} similar items")
+                    
+                    # Debug: Check STARTSKU_DATE distribution in results
+                    if 'STARTSKU_DATE' not in matching_filters:
+                        startsku_dates = [item.get('STARTSKU_DATE', 'N/A') for item in similar_results[:20]]  # Check first 20
+                        unique_dates = set(startsku_dates)
+                        logger.info(f"   📅 STARTSKU_DATE distribution (first 20): {len(unique_dates)} unique values")
+                        if len(unique_dates) <= 3:
+                            logger.info(f"      Values: {list(unique_dates)}")
                     
                     # Apply filters to the search results
                     # Apply gender filtering if unisex grouping is enabled
@@ -945,7 +1179,8 @@ async def change_checkpoint(checkpoint: str = Form(...)):
     """Change LoRA checkpoint"""
     global INITIALIZATION_STATUS
     try:
-        csv_path = "database_results/final_with_aws_shapes_20250625_155822.csv"
+        # Use enriched database with shape information from final_for_similarity.csv
+        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
         if search_engine.initialize(csv_path, checkpoint=checkpoint):
             INITIALIZATION_STATUS = {"initialized": True, "message": f"Switched to checkpoint {checkpoint}"}
             return {"success": True, "message": f"Switched to checkpoint {checkpoint}"}

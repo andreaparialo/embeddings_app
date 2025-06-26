@@ -27,25 +27,11 @@ for name in model_names:
 
 if not found:
     print("❌ GME model directory not found in current directory")
-    print("\n📁 Looking for model files in parent directory...")
-    
-    parent_dir = os.path.dirname(os.getcwd())
-    for name in model_names:
-        path = os.path.join(parent_dir, name)
-        if os.path.exists(path):
-            print(f"✅ Found model in parent: {path}")
-            found = True
-            break
-    
-    if not found:
-        print("❌ Model not found in parent directory either")
 
 print("\n🔍 Checking for LoRA directories...")
 lora_paths = [
     "loras/v11-20250620-105815/checkpoint-1095",
-    "../loras/v11-20250620-105815/checkpoint-1095",
-    "loras/v11-20250620-105815",
-    "../loras/v11-20250620-105815"
+    "loras/v11-20250620-105815"
 ]
 
 lora_found = False

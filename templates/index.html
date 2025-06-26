@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hybrid Product Search Engine</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .search-card { margin-bottom: 2rem; }
+        .result-card { margin-bottom: 1rem; }
+        .result-image { max-width: 150px; max-height: 150px; object-fit: cover; }
+        .filter-section { background-color: #f8f9fa; padding: 1rem; border-radius: 0.5rem; margin-bottom: 1rem; }
+        .status-badge { position: fixed; top: 10px; right: 10px; z-index: 1000; }
+        .loading { display: none; }
+        .similarity-score { font-size: 0.8em; color: #666; }
+        .result-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-search me-2"></i>Hybrid Product Search
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text" id="status-info">
+                    {% if initialization_status.initialized %}
+                        <span class="badge bg-success">Ready</span>
+                    {% else %}
+                        <span class="badge bg-danger">Not Ready</span>
+                    {% endif %}
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        {% if not initialization_status.initialized %}
+        <div class="alert alert-warning">
+            <h5><i class="fas fa-exclamation-triangle me-2"></i>System Not Ready</h5>
+            <p>{{ initialization_status.message }}</p>
+        </div>
+        {% endif %}
+
+        <!-- Checkpoint Selection -->
+        {% if checkpoints %}
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-cog me-2"></i>Model Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form id="checkpoint-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="checkpoint-select" class="form-label">LoRA Checkpoint:</label>
+                            <select class="form-select" id="checkpoint-select" name="checkpoint">
+                                {% for checkpoint in checkpoints %}
+                                <option value="{{ checkpoint }}" {% if checkpoint == "680" %}selected{% endif %}>
+                                    checkpoint-{{ checkpoint }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button type="submit" class="btn btn-secondary">
+                                <i class="fas fa-sync-alt me-2"></i>Switch Checkpoint
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- Search by Image -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-camera me-2"></i>Search by Image</h5>
+            </div>
+            <div class="card-body">
+                <form id="image-search-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="image-file" class="form-label">Upload Image:</label>
+                        <input class="form-control" type="file" id="image-file" name="file" accept="image/*" required>
+                    </div>
+                    <div class="filter-section">
+                        <h6>Filters (Optional):</h6>
+                        <div id="image-filters"></div>
+                    </div>
+                    <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-search me-2"></i>Search by Image
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Search by SKU -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-barcode me-2"></i>Search by SKU</h5>
+            </div>
+            <div class="card-body">
+                <form id="sku-search-form">
+                    <div class="mb-3">
+                        <label for="sku-input" class="form-label">SKU Code:</label>
+                        <input type="text" class="form-control" id="sku-input" name="sku_cod" placeholder="Enter SKU code" required>
+                    </div>
+                    <button type="submit" class="btn btn-success" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-search me-2"></i>Search SKU
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Batch Search by Excel -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-file-excel me-2"></i>Enhanced Batch Search by Excel</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-success d-flex align-items-center mb-3" role="alert">
+                    <i class="fas fa-rocket me-2"></i>
+                    <div>
+                        <strong>Performance Optimization Active!</strong> SKUs are automatically grouped by image (filename_root). 
+                        Multiple SKUs sharing the same product image are processed together with a single search!
+                        <br><small class="text-muted">Smart fallback handles truncated SKUs and partial matches.</small>
+                        <br><small class="text-muted"><strong>NEW:</strong> Batches with >10 unique images use parallel processing (16 images at once)!</small>
+                    </div>
+                </div>
+                <form id="excel-search-form" enctype="multipart/form-data">
+                    <div class="mb-3">
+                        <label for="excel-file" class="form-label">Upload Excel File (SKU codes in first column):</label>
+                        <input class="form-control" type="file" id="excel-file" name="file" accept=".xlsx,.xls" required>
+                    </div>
+                    <div class="filter-section">
+                        <h6>Select Columns to Match:</h6>
+                        <p class="text-muted small">For each SKU, similar products will be filtered to match the selected attributes.</p>
+                        <div id="excel-matching-columns" class="row"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Allowed MD SKU Status Codes:</label>
+                        <div class="row">
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-il" name="allowed_status_codes" value="IL" checked>
+                                    <label class="form-check-label" for="status-il">IL</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-ns" name="allowed_status_codes" value="NS" checked>
+                                    <label class="form-check-label" for="status-ns">NS</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-nf" name="allowed_status_codes" value="NF" checked>
+                                    <label class="form-check-label" for="status-nf">NF</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-ob" name="allowed_status_codes" value="OB" checked>
+                                    <label class="form-check-label" for="status-ob">OB</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-aa" name="allowed_status_codes" value="AA" checked>
+                                    <label class="form-check-label" for="status-aa">AA</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="status-empty" name="allowed_status_codes" value="">
+                                    <label class="form-check-label" for="status-empty">Empty</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-text">Select which status codes to include in search results (default: all active statuses)</div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="group-unisex" name="group_unisex">
+                            <label class="form-check-label" for="group-unisex">
+                                <strong>Group Unisex</strong> (Only applies when USERGENDER_DES is selected for matching)
+                            </label>
+                            <div class="form-text">If enabled: MAN includes UNISEX ADULT, WOMAN includes UNISEX ADULT</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="dual-engine" name="dual_engine">
+                            <label class="form-check-label" for="dual-engine">
+                                <strong>🚀 Dual Engine Mode</strong> (Experimental)
+                            </label>
+                            <div class="form-text">Combines results from 2 model checkpoints. SKUs found by both models get priority boost!</div>
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="filter-only-mode" name="filter_only_mode">
+                            <label class="form-check-label" for="filter-only-mode">
+                                <strong>🔍 Filter-Only Mode</strong> (No Image Search)
+                            </label>
+                            <div class="form-text">Skip image similarity search and match based ONLY on selected columns. Returns ALL matching products from database!</div>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="max-results-per-sku" class="form-label">Max Results per SKU:</label>
+                            <select class="form-select" id="max-results-per-sku" name="max_results_per_sku">
+                                <option value="5">5</option>
+                                <option value="10" selected>10</option>
+                                <option value="20">20</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
+                                <option value="500">500</option>
+                                <option value="1000">1000</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3 d-flex align-items-end">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="exclude-same-model" name="exclude_same_model" checked>
+                                <label class="form-check-label" for="exclude-same-model">
+                                    Exclude same MODEL_COD
+                                </label>
+                                <div class="form-text">Filter out products with the same model code as the source SKU</div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-info" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-upload me-2"></i>Process & Export Results
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Search by Filters Only -->
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-filter me-2"></i>Search by Filters</h5>
+            </div>
+            <div class="card-body">
+                <form id="filter-search-form">
+                    <div class="filter-section">
+                        <div id="filter-controls"></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">MD SKU Status Codes:</label>
+                        <div class="row">
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-il" name="status_filter" value="IL" checked>
+                                    <label class="form-check-label" for="filter-status-il">IL</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-ns" name="status_filter" value="NS" checked>
+                                    <label class="form-check-label" for="filter-status-ns">NS</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-nf" name="status_filter" value="NF" checked>
+                                    <label class="form-check-label" for="filter-status-nf">NF</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-ob" name="status_filter" value="OB" checked>
+                                    <label class="form-check-label" for="filter-status-ob">OB</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-aa" name="status_filter" value="AA" checked>
+                                    <label class="form-check-label" for="filter-status-aa">AA</label>
+                                </div>
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-status-empty" name="status_filter" value="">
+                                    <label class="form-check-label" for="filter-status-empty">Empty</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-warning" {% if not initialization_status.initialized %}disabled{% endif %}>
+                        <i class="fas fa-search me-2"></i>Search by Filters
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div class="text-center loading" id="loading">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Searching...</p>
+        </div>
+
+        <!-- Results -->
+        <div id="results-container" style="display: none;">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5><i class="fas fa-list me-2"></i>Search Results</h5>
+                    <span id="results-count" class="badge bg-primary"></span>
+                </div>
+                <div class="card-body">
+                    <div id="results-grid" class="result-grid"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Initialize filter options
+        const filterOptions = {{ filter_options | tojson }};
+        
+        // Create filter controls
+        function createFilterControls(containerId, prefix = '') {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+            
+            const mainFilters = ['BRAND_DES', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'BRAND_CLUSTER'];
+            
+            for (const [column, options] of Object.entries(filterOptions)) {
+                if (options.length > 500) continue; // Skip columns with too many options
+                
+                const div = document.createElement('div');
+                div.className = 'mb-2';
+                
+                const label = document.createElement('label');
+                label.className = 'form-label';
+                label.textContent = column.replace(/_/g, ' ');
+                
+                // Always create dropdown for all filters
+                const select = document.createElement('select');
+                select.className = 'form-select form-select-sm';
+                select.name = prefix + column;
+                
+                const defaultOption = document.createElement('option');
+                defaultOption.value = '';
+                defaultOption.textContent = '-- All --';
+                select.appendChild(defaultOption);
+                
+                options.forEach(option => {
+                    const opt = document.createElement('option');
+                    opt.value = option;
+                    opt.textContent = option;
+                    select.appendChild(opt);
+                });
+                
+                div.appendChild(label);
+                div.appendChild(select);
+                
+                // Prioritize main filters
+                if (mainFilters.includes(column)) {
+                    container.insertBefore(div, container.firstChild);
+                } else {
+                    container.appendChild(div);
+                }
+            }
+        }
+        
+        // Initialize filters
+        createFilterControls('image-filters');
+        createFilterControls('filter-controls');
+        createMatchingColumnsCheckboxes();
+        
+        // Utility functions
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('results-container').style.display = 'none';
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+        
+        function showResults(results, count) {
+            hideLoading();
+            const container = document.getElementById('results-container');
+            const grid = document.getElementById('results-grid');
+            const countBadge = document.getElementById('results-count');
+            
+            countBadge.textContent = `${count} results`;
+            grid.innerHTML = '';
+            
+            results.forEach(result => {
+                const card = createResultCard(result);
+                grid.appendChild(card);
+            });
+            
+            container.style.display = 'block';
+            container.scrollIntoView({ behavior: 'smooth' });
+        }
+        
+        function createResultCard(result) {
+            const card = document.createElement('div');
+            card.className = 'card result-card';
+            
+            let imageHtml = '';
+            if (result.image_path) {
+                console.log('🖼️ Image path:', result.image_path, 'for SKU:', result.SKU_COD);
+                const imgSrc = `/${result.image_path}`;
+                console.log('🔗 Generated src:', imgSrc);
+                imageHtml = `<img src="${imgSrc}" class="card-img-top result-image" alt="Product Image">`;
+                console.log('🏷️ Generated HTML:', imageHtml);
+            } else {
+                console.log('❌ No image_path for SKU:', result.SKU_COD);
+            }
+            
+            let similarityHtml = '';
+            if (result.similarity_score !== undefined) {
+                similarityHtml = `<div class="similarity-score">Similarity: ${(1 - result.similarity_score).toFixed(3)}</div>`;
+            }
+            
+            card.innerHTML = `
+                ${imageHtml}
+                <div class="card-body">
+                    <h6 class="card-title">${result.SKU_COD || 'N/A'}</h6>
+                    ${similarityHtml}
+                    <p class="card-text">
+                        <strong>Brand:</strong> ${result.BRAND_DES || 'N/A'}<br>
+                        <strong>Gender:</strong> ${result.USERGENDER_DES || 'N/A'}<br>
+                        <strong>Color:</strong> ${result.COLOR_FAMILY_1_DES || 'N/A'}<br>
+                        <strong>Price:</strong> ${result.ACT_SKU_PRICE_VAL || 'N/A'}
+                    </p>
+                    <small class="text-muted">Filename: ${result.filename_root || 'N/A'}</small>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function collectFilters(containerElement) {
+            const filters = {};
+            
+            // Find all input and select elements within the container
+            const inputs = containerElement.querySelectorAll('input, select');
+            
+            inputs.forEach(input => {
+                if (input.name && input.value && input.value.trim() !== '') {
+                    filters[input.name] = input.value.trim();
+                }
+            });
+            
+            return filters;
+        }
+        
+        function collectStatusCodes(containerId = 'filter-search-form') {
+            const statusCodes = [];
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.querySelectorAll('input[name="status_filter"]:checked').forEach(checkbox => {
+                    statusCodes.push(checkbox.value);
+                });
+            }
+            return statusCodes;
+        }
+        
+        function createMatchingColumnsCheckboxes() {
+            const container = document.getElementById('excel-matching-columns');
+            container.innerHTML = '';
+            
+            // Main columns that are most useful for matching
+            const mainColumns = ['BRAND_DES', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'BRAND_CLUSTER', 'PRODUCT_TYPE_COD'];
+            
+            // Create checkboxes for main columns
+            mainColumns.forEach(column => {
+                if (filterOptions[column]) {
+                    const colDiv = document.createElement('div');
+                    colDiv.className = 'col-md-4 col-sm-6 mb-2';
+                    
+                    const checkDiv = document.createElement('div');
+                    checkDiv.className = 'form-check';
+                    
+                    const checkbox = document.createElement('input');
+                    checkbox.className = 'form-check-input';
+                    checkbox.type = 'checkbox';
+                    checkbox.id = `match-${column}`;
+                    checkbox.name = 'matching_columns';
+                    checkbox.value = column;
+                    
+                    const label = document.createElement('label');
+                    label.className = 'form-check-label';
+                    label.htmlFor = `match-${column}`;
+                    label.textContent = column.replace(/_/g, ' ');
+                    
+                    checkDiv.appendChild(checkbox);
+                    checkDiv.appendChild(label);
+                    colDiv.appendChild(checkDiv);
+                    container.appendChild(colDiv);
+                }
+            });
+            
+            // Add "Other Columns" section
+            const otherColumns = Object.keys(filterOptions).filter(col => !mainColumns.includes(col));
+            if (otherColumns.length > 0) {
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'col-12 mt-2';
+                
+                const details = document.createElement('details');
+                const summary = document.createElement('summary');
+                summary.textContent = 'Other Columns';
+                summary.className = 'btn btn-outline-secondary btn-sm mb-2';
+                
+                const otherContainer = document.createElement('div');
+                otherContainer.className = 'row';
+                
+                otherColumns.forEach(column => {
+                    if (filterOptions[column] && filterOptions[column].length < 500) { // Skip columns with too many options
+                        const colDiv = document.createElement('div');
+                        colDiv.className = 'col-md-4 col-sm-6 mb-2';
+                        
+                        const checkDiv = document.createElement('div');
+                        checkDiv.className = 'form-check';
+                        
+                        const checkbox = document.createElement('input');
+                        checkbox.className = 'form-check-input';
+                        checkbox.type = 'checkbox';
+                        checkbox.id = `match-${column}`;
+                        checkbox.name = 'matching_columns';
+                        checkbox.value = column;
+                        
+                        const label = document.createElement('label');
+                        label.className = 'form-check-label';
+                        label.htmlFor = `match-${column}`;
+                        label.textContent = column.replace(/_/g, ' ');
+                        
+                        checkDiv.appendChild(checkbox);
+                        checkDiv.appendChild(label);
+                        colDiv.appendChild(checkDiv);
+                        otherContainer.appendChild(colDiv);
+                    }
+                });
+                
+                details.appendChild(summary);
+                details.appendChild(otherContainer);
+                detailsDiv.appendChild(details);
+                container.appendChild(detailsDiv);
+            }
+        }
+        
+        // Event handlers
+        document.getElementById('checkpoint-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch('/api/change-checkpoint', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    alert(`Success: ${result.message}`);
+                    location.reload();
+                } else {
+                    alert(`Error: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+            } finally {
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('image-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            console.log('🔍 Image search form submitted');
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            const filters = collectFilters(document.getElementById('image-filters'));
+            formData.append('filters', JSON.stringify(filters));
+            
+            console.log('📁 Form data prepared:', {
+                file: formData.get('file')?.name,
+                filters: formData.get('filters'),
+                fileSize: formData.get('file')?.size
+            });
+            
+            try {
+                console.log('🚀 Sending request to /search/image...');
+                const response = await fetch('/search/image', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                console.log('📡 Response received:', response.status, response.statusText);
+                const result = await response.json();
+                console.log('📋 Response data:', result);
+                
+                if (response.ok) {
+                    console.log('✅ Search successful, showing results');
+                    showResults(result.results, result.total || result.count);
+                } else {
+                    console.error('❌ Search failed:', result.error);
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                console.error('❌ Request failed:', error);
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('sku-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            
+            try {
+                const response = await fetch('/search/sku', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResults(result.results || [], result.total || result.results.length);
+                } else {
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('excel-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const formData = new FormData(e.target);
+            
+            // Collect selected matching columns
+            const selectedColumns = [];
+            const checkboxes = document.querySelectorAll('input[name="matching_columns"]:checked');
+            checkboxes.forEach(checkbox => {
+                selectedColumns.push(checkbox.value);
+            });
+            
+            if (selectedColumns.length === 0) {
+                alert('Please select at least one column to match.');
+                hideLoading();
+                return;
+            }
+            
+            formData.append('matching_columns', JSON.stringify(selectedColumns));
+            
+            // Add exclude same model code option
+            const excludeSameModel = document.getElementById('exclude-same-model').checked;
+            formData.append('exclude_same_model', excludeSameModel);
+            
+            // Collect selected status codes
+            const selectedStatusCodes = [];
+            document.querySelectorAll('input[name="allowed_status_codes"]:checked').forEach(checkbox => {
+                selectedStatusCodes.push(checkbox.value);
+            });
+            formData.append('allowed_status_codes', JSON.stringify(selectedStatusCodes));
+            
+            // Add group unisex option
+            const groupUnisex = document.getElementById('group-unisex').checked;
+            formData.append('group_unisex', groupUnisex);
+            
+            // Add dual engine option
+            const dualEngine = document.getElementById('dual-engine').checked;
+            formData.append('dual_engine', dualEngine);
+            
+            // Check if filter-only mode is selected
+            const filterOnlyMode = document.getElementById('filter-only-mode').checked;
+            
+            console.log('📊 Enhanced batch search:', {
+                file: formData.get('file')?.name,
+                matchingColumns: selectedColumns,
+                maxResults: formData.get('max_results_per_sku'),
+                excludeSameModel: excludeSameModel,
+                allowedStatusCodes: selectedStatusCodes,
+                groupUnisex: groupUnisex,
+                dualEngine: dualEngine,
+                filterOnlyMode: filterOnlyMode
+            });
+            
+            try {
+                // Use different endpoint based on filter-only mode
+                const endpoint = filterOnlyMode ? '/search/batch-filter-only' : '/search/batch-enhanced';
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    // Handle file download
+                    const blob = await response.blob();
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = url;
+                    a.download = 'batch_search_results.xlsx';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                    
+                    alert('✅ Results exported successfully! Check your downloads.');
+                    hideLoading();
+                } else {
+                    const result = await response.json();
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+        
+        document.getElementById('filter-search-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            
+            const filters = collectFilters(document.getElementById('filter-controls'));
+            const statusCodes = collectStatusCodes('filter-search-form');
+            
+            // Add status code filter if any are selected
+            if (statusCodes.length > 0) {
+                filters['MD_SKU_STATUS_COD'] = statusCodes;
+            }
+            
+            const formData = new FormData();
+            formData.append('filters', JSON.stringify(filters));
+            
+            try {
+                const response = await fetch('/search/filters', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (response.ok) {
+                    showResults(result.results, result.total || result.count);
+                } else {
+                    alert(`Error: ${result.error}`);
+                    hideLoading();
+                }
+            } catch (error) {
+                alert(`Error: ${error.message}`);
+                hideLoading();
+            }
+        });
+
+
+    </script>
+</body>
+</html> 

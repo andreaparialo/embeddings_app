@@ -424,35 +424,45 @@ class OpenCLIPSearchEngine:
     
     def _get_image_path(self, filename_root: str) -> Optional[str]:
         """Get the actual image path for a filename_root"""
-        if not filename_root:
-            return None
+        # First check in openclip_data_loader's metadata
+        if filename_root not in openclip_data_loader.filename_to_idx:
+            # Try case variations
+            for variant in [filename_root.lower(), filename_root.upper()]:
+                if variant in openclip_data_loader.filename_to_idx:
+                    filename_root = variant
+                    break
+            else:
+                return None
         
-        # Get the parent directory's pictures folder
-        pictures_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "pictures")
+        idx = openclip_data_loader.filename_to_idx[filename_root]
+        if idx < len(openclip_data_loader.metadata['image_paths']):
+            image_path = openclip_data_loader.metadata['image_paths'][idx]
+            
+            # Path is already correct - pictures is in current directory
+            if image_path.startswith('pictures/'):
+                # Pictures is in current directory
+                pass
+            
+            # Check if file exists
+            if os.path.exists(image_path):
+                return image_path
+            else:
+                # Try alternative paths
+                filename = os.path.basename(image_path)
+                
+                # Try in ../pictures/
+                alt_path = os.path.join('..', 'pictures', filename)
+                if os.path.exists(alt_path):
+                    return alt_path
+                
+                # Try just pictures/ (in case running from parent)
+                alt_path2 = os.path.join('pictures', filename)
+                if os.path.exists(alt_path2):
+                    return alt_path2
+                
+                logger.warning(f"Image file not found: {image_path}")
+                return None
         
-        # Try both .jpg and .JPG extensions
-        for ext in ['.jpg', '.JPG']:
-            # Look for files starting with filename_root
-            import glob
-            pattern = os.path.join(pictures_dir, f"{filename_root}_*{ext}")
-            matches = glob.glob(pattern)
-            if matches:
-                # Return web path
-                basename = os.path.basename(matches[0])
-                logger.debug(f"🖼️  Found image for {filename_root}: {basename}")
-                return f"/pictures/{basename}"  # Return web path
-        
-        # If no match found, try just the filename_root + extension
-        for ext in ['.jpg', '.JPG']:
-            import glob
-            pattern = os.path.join(pictures_dir, f"{filename_root}{ext}")
-            matches = glob.glob(pattern)
-            if matches:
-                basename = os.path.basename(matches[0])
-                logger.debug(f"🖼️  Found direct image for {filename_root}: {basename}")
-                return f"/pictures/{basename}"
-        
-        logger.warning(f"⚠️  No image found for filename_root: {filename_root}")
         return None
     
     def get_filter_options(self) -> Dict[str, List]:

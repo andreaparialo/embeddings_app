@@ -10,20 +10,29 @@ from typing import Dict, List, Optional
 import logging
 
 def get_image_path(filename_root):
-    """Get the correct image path, handling both .JPG and .jpg extensions"""
-    if not filename_root:
-        return None
+    """Get image path for display in the UI"""
+    # Check if data_loader has a mapping for this filename_root
+    if hasattr(data_loader, 'get_image_path'):
+        path = data_loader.get_image_path(filename_root)
+        if path and os.path.exists(path):
+            # Convert to web-accessible path
+            return f"/pictures/{os.path.basename(path)}"
     
-    # Try both .JPG and .jpg extensions
-    image_path_jpg_upper = f"pictures/{filename_root}_O00.JPG"
-    image_path_jpg_lower = f"pictures/{filename_root}_O00.jpg"
+    # Fallback to direct search in pictures directory
+    for ext in ['.jpg', '.JPG']:
+        # Try with _O00 suffix
+        filename = f"{filename_root}_O00{ext}"
+        path = os.path.join('..', 'pictures', filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
+        
+        # Try without suffix
+        filename = f"{filename_root}{ext}"
+        path = os.path.join('..', 'pictures', filename)
+        if os.path.exists(path):
+            return f"/pictures/{filename}"
     
-    if os.path.exists(image_path_jpg_upper):
-        return image_path_jpg_upper
-    elif os.path.exists(image_path_jpg_lower):
-        return image_path_jpg_lower
-    else:
-        return None
+    return None
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -32,17 +41,21 @@ logger = logging.getLogger(__name__)
 # Create FastAPI app
 app = FastAPI(title="Hybrid Product Search Engine", version="1.0.0")
 
+# Get the base paths
+app_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = app_dir  # Resources are now in the same directory
+
 # Create directories if they don't exist
-os.makedirs("static", exist_ok=True)
-os.makedirs("templates", exist_ok=True)
-os.makedirs("uploads", exist_ok=True)
+os.makedirs(os.path.join(app_dir, "static"), exist_ok=True)
+os.makedirs(os.path.join(app_dir, "templates"), exist_ok=True)
+os.makedirs(os.path.join(app_dir, "uploads"), exist_ok=True)
 
 # Mount static files
-app.mount("/static", StaticFiles(directory="static"), name="static")
-app.mount("/pictures", StaticFiles(directory="pictures", follow_symlink=True), name="pictures")
+app.mount("/static", StaticFiles(directory=os.path.join(app_dir, "static")), name="static")
+app.mount("/pictures", StaticFiles(directory=os.path.join(parent_dir, "pictures"), follow_symlink=True), name="pictures")
 
 # Setup templates
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=os.path.join(app_dir, "templates"))
 
 # Global variables
 INITIALIZATION_STATUS = {"initialized": False, "message": "Minimal mode - AI features disabled"}
@@ -52,7 +65,7 @@ def load_csv_data():
     """Load CSV data"""
     global df, INITIALIZATION_STATUS
     try:
-        csv_path = "database_results/final_with_aws_shapes_20250625_155822.csv"
+        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_20250625_155822.csv")
         if not os.path.exists(csv_path):
             INITIALIZATION_STATUS = {"initialized": False, "message": "CSV file not found"}
             return False

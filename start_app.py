@@ -11,7 +11,7 @@ import subprocess
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 os.chdir(parent_dir)
 
-print("✅ Starting Hybrid Product Search Engine from old_app...")
+print("✅ Starting Hybrid Product Search Engine...")
 print("📊 This may take a few minutes to load the model and data...")
 print("🌐 Web interface will be available at: http://127.0.0.1:8080")
 print(f"📁 Working directory: {os.getcwd()}")

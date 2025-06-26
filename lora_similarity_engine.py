@@ -36,7 +36,7 @@ class LoRAImageSimilarityEngine:
     Properly loads and uses LoRA adapters for improved performance.
     """
     
-    def __init__(self, base_model_path: str = "../gme-Qwen2-VL-7B-Instruct", 
+    def __init__(self, base_model_path: str = "./gme-Qwen2-VL-7B-Instruct", 
                  lora_path: str = None, device: str = "auto"):
         """
         Initialize the LoRA similarity engine.
@@ -56,7 +56,7 @@ class LoRAImageSimilarityEngine:
             logger.info(f"Loading LoRA adapters from {lora_path}")
             
             # Load base model
-            base_model = AutoModel.from_pretrained(
+            self.base_model = AutoModel.from_pretrained(
                 base_model_path,
                 torch_dtype="float16" if self.device == "cuda" else "float32",
                 device_map=self.device,
@@ -65,13 +65,10 @@ class LoRAImageSimilarityEngine:
             
             # Load LoRA adapters
             self.model = PeftModel.from_pretrained(
-                base_model,
+                self.base_model,
                 lora_path,
                 torch_dtype="float16" if self.device == "cuda" else "float32"
             )
-            
-            # Don't merge - keep as PeftModel to preserve methods
-            # self.model = self.model.merge_and_unload()
             
             logger.info("LoRA model loaded successfully!")
         else:
@@ -83,9 +80,6 @@ class LoRAImageSimilarityEngine:
                 trust_remote_code=True
             )
             logger.info("Base model loaded successfully!")
-        
-        # Set model to eval mode
-        self.model.eval()
         
         # Index storage
         self.image_paths = []
@@ -103,29 +97,16 @@ class LoRAImageSimilarityEngine:
         else:
             return Image.open(image_path).convert('RGB')
     
-    @torch.no_grad()
-    def get_image_embedding(self, image_input: Union[str, Path, Image.Image]) -> np.ndarray:
+    def get_image_embedding(self, image_path: Union[str, Path]) -> np.ndarray:
         """Get embedding for a single image."""
         try:
-            # Handle both file paths and PIL Image objects
-            if isinstance(image_input, Image.Image):
-                image = image_input
-            else:
-                image = self.load_image(image_input)
-            
-            # Use the model's get_image_embeddings method
+            image = self.load_image(image_path)
             embeddings = self.model.get_image_embeddings(images=[image])
-            
-            # Convert to numpy
-            if isinstance(embeddings, torch.Tensor):
-                return embeddings.cpu().numpy()[0]
-            else:
-                return embeddings[0]
+            return embeddings.cpu().numpy()[0]
         except Exception as e:
-            logger.error(f"Error processing image {image_input}: {e}")
+            logger.error(f"Error processing image {image_path}: {e}")
             return None
     
-    @torch.no_grad()
     def get_text_embedding(self, text: str, instruction: str = None) -> np.ndarray:
         """Get embedding for text query."""
         try:
@@ -133,55 +114,10 @@ class LoRAImageSimilarityEngine:
                 embeddings = self.model.get_text_embeddings(texts=[text], instruction=instruction)
             else:
                 embeddings = self.model.get_text_embeddings(texts=[text])
-                
-            # Convert to numpy
-            if isinstance(embeddings, torch.Tensor):
-                return embeddings.cpu().numpy()[0]
-            else:
-                return embeddings[0]
+            return embeddings.cpu().numpy()[0]
         except Exception as e:
             logger.error(f"Error processing text '{text}': {e}")
             return None
-    
-    def process_images_batch(self, image_paths: List[Union[str, Path]], batch_size: int = 8) -> List[np.ndarray]:
-        """Process multiple images in batches for efficiency."""
-        embeddings = []
-        
-        for i in range(0, len(image_paths), batch_size):
-            batch_paths = image_paths[i:i + batch_size]
-            batch_images = []
-            valid_indices = []
-            
-            # Load images
-            for idx, img_path in enumerate(batch_paths):
-                try:
-                    image = self.load_image(img_path)
-                    batch_images.append(image)
-                    valid_indices.append(i + idx)
-                except Exception as e:
-                    logger.error(f"Error loading image {img_path}: {e}")
-                    continue
-            
-            if batch_images:
-                try:
-                    # Process batch
-                    with torch.no_grad():
-                        batch_embeddings = self.model.get_image_embeddings(images=batch_images)
-                    
-                    # Convert to numpy
-                    if isinstance(batch_embeddings, torch.Tensor):
-                        batch_embeddings = batch_embeddings.cpu().numpy()
-                    
-                    embeddings.extend(batch_embeddings)
-                except Exception as e:
-                    logger.error(f"Error processing batch: {e}")
-                    # Process individually as fallback
-                    for img_path in batch_paths:
-                        emb = self.get_image_embedding(img_path)
-                        if emb is not None:
-                            embeddings.append(emb)
-        
-        return embeddings
     
     def search_by_text(self, query: str, k: int = 5, 
                       instruction: str = "Find images that match the given text.") -> List[Tuple[str, float]]:
@@ -219,45 +155,10 @@ class LoRAImageSimilarityEngine:
         
         return results
     
-    def search_by_image(self, query_image: Union[str, Path, Image.Image], k: int = 5) -> List[Tuple[str, float]]:
-        """
-        Search for similar images using an image query.
-        
-        Args:
-            query_image: Path to the query image or PIL Image object
-            k: Number of results to return
-            
-        Returns:
-            List of tuples (image_path, similarity_score)
-        """
-        if self.faiss_index is None:
-            raise ValueError("No index loaded. Please index images first.")
-        
-        # Get query embedding
-        query_embedding = self.get_image_embedding(query_image)
-        if query_embedding is None:
-            raise ValueError("Failed to generate embedding for query image")
-        
-        # Normalize query embedding
-        query_embedding = query_embedding / np.linalg.norm(query_embedding)
-        query_embedding = query_embedding.reshape(1, -1).astype('float32')
-        
-        # Search
-        similarities, indices = self.faiss_index.search(query_embedding, k)
-        
-        # Return results
-        results = []
-        for i, (similarity, idx) in enumerate(zip(similarities[0], indices[0])):
-            if idx < len(self.image_paths):
-                results.append((self.image_paths[idx], float(similarity)))
-        
-        return results
-    
     def index_images(self, image_directory: Union[str, Path], 
                     supported_formats: List[str] = None,
                     save_index: bool = True,
-                    index_name: str = "lora_image_index",
-                    batch_size: int = 8) -> None:
+                    index_name: str = "lora_image_index") -> None:
         """
         Index all images in a directory.
         
@@ -266,7 +167,6 @@ class LoRAImageSimilarityEngine:
             supported_formats: List of supported image formats
             save_index: Whether to save the index to disk
             index_name: Name for the saved index
-            batch_size: Batch size for processing images
         """
         if supported_formats is None:
             supported_formats = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp']
@@ -286,15 +186,24 @@ class LoRAImageSimilarityEngine:
         
         logger.info(f"Found {len(image_files)} images to index")
         
-        # Generate embeddings using batch processing
-        embeddings = self.process_images_batch(image_files, batch_size=batch_size)
+        # Generate embeddings
+        embeddings = []
+        valid_paths = []
+        
+        for img_path in tqdm(image_files, desc="Indexing images"):
+            embedding = self.get_image_embedding(img_path)
+            if embedding is not None:
+                embeddings.append(embedding)
+                valid_paths.append(str(img_path))
+            else:
+                logger.warning(f"Skipping {img_path} due to processing error")
         
         if not embeddings:
             raise ValueError("No valid embeddings generated")
         
         # Store embeddings and paths
         self.image_embeddings = np.array(embeddings)
-        self.image_paths = [str(img_path) for img_path in image_files[:len(embeddings)]]
+        self.image_paths = valid_paths
         
         # Create FAISS index
         dimension = self.image_embeddings.shape[1]
@@ -312,8 +221,7 @@ class LoRAImageSimilarityEngine:
     
     def save_index(self, index_name: str) -> None:
         """Save the current index to disk."""
-        # Try both index directory locations
-        index_dir = Path("indexes") if Path("indexes").exists() else Path("../indexes")
+        index_dir = Path("indexes")
         index_dir.mkdir(exist_ok=True)
         
         # Save FAISS index
@@ -337,8 +245,7 @@ class LoRAImageSimilarityEngine:
     
     def load_index(self, index_name: str) -> None:
         """Load a previously saved index."""
-        # Try both index directory locations
-        index_dir = Path("indexes") if Path("indexes").exists() else Path("../indexes")
+        index_dir = Path("indexes")
         
         # Load FAISS index
         self.faiss_index = faiss.read_index(str(index_dir / f"{index_name}.faiss"))
@@ -388,7 +295,7 @@ def create_lora_engine(checkpoint_path: str) -> LoRAImageSimilarityEngine:
     Returns:
         LoRAImageSimilarityEngine instance
     """
-    base_model_path = "../gme-Qwen2-VL-7B-Instruct"
+    base_model_path = "./gme-Qwen2-VL-7B-Instruct"
     return LoRAImageSimilarityEngine(
         base_model_path=base_model_path,
         lora_path=checkpoint_path

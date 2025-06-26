@@ -106,6 +106,8 @@ source ~/.bashrc
 ```bash
 # Create environment with Python 3.10
 conda create -n faiss_env python=3.10 -y
+conda init
+#close and reopen powershell terminal
 conda activate faiss_env
 ```
 

@@ -3,14 +3,16 @@ import pandas as pd
 from typing import Dict, List, Optional, Tuple
 import logging
 import os
-from old_app.data_loader import data_loader
-from old_app.gme_model import gme_model
+from data_loader import data_loader
+from gme_model import gme_model
 
 logger = logging.getLogger(__name__)
 
 class HybridSearchEngine:
     def __init__(self):
         self.is_initialized = False
+        self.gme_loaded = False
+        self.checkpoint = "1095"
     
     def initialize(self, csv_path: str, index_dir: str = "indexes", checkpoint: str = "1095"):
         """Initialize the search engine with CSV data and FAISS index"""
@@ -27,17 +29,30 @@ class HybridSearchEngine:
             if not data_loader.load_faiss_index(index_dir, checkpoint):
                 return False
             
-            # Load GME model with LoRA
-            if not gme_model.load_model("gme-Qwen2-VL-7B-Instruct", checkpoint):
-                logger.warning("Failed to load GME model, some features may not work")
+            # Store checkpoint for lazy loading GME model later
+            self.checkpoint = checkpoint
+            self.gme_loaded = False
             
             self.is_initialized = True
             logger.info("✅ Hybrid Search Engine initialized successfully")
+            logger.info("💡 GME model will be loaded on first image search (lazy loading)")
             return True
             
         except Exception as e:
             logger.error(f"❌ Error initializing search engine: {e}")
             return False
+    
+    def _ensure_gme_loaded(self):
+        """Lazy load GME model when needed"""
+        if not self.gme_loaded:
+            logger.info("🤖 Loading GME model (first image search)...")
+            if gme_model.load_model("gme-Qwen2-VL-7B-Instruct", self.checkpoint):
+                self.gme_loaded = True
+                logger.info("✅ GME model loaded successfully")
+            else:
+                logger.error("❌ Failed to load GME model")
+                return False
+        return True
     
     def search_by_image_similarity(self, query_image_path: str, filters: Dict = None, top_k: int = 50) -> List[Dict]:
         """Search by image similarity with optional filters"""
@@ -52,13 +67,13 @@ class HybridSearchEngine:
             if filters:
                 logger.info(f"🔧 Filters applied: {list(filters.keys())}")
             
+            # Ensure GME model is loaded (lazy loading)
+            if not self._ensure_gme_loaded():
+                logger.error("❌ Cannot load GME model for image encoding")
+                return []
+            
             # Encode query image
             logger.info("🤖 Encoding query image with GME model...")
-            
-            # Check if GME model is properly loaded
-            if gme_model.model is None:
-                logger.error("❌ GME model not loaded - cannot encode query image")
-                return []
             
             query_embedding = gme_model.encode_image(query_image_path)
             if query_embedding is None:
@@ -187,8 +202,9 @@ class HybridSearchEngine:
             
             # 1. Exact SKU match
             logger.info("🎯 Strategy 1: Exact SKU match...")
+            # CRITICAL: Ensure both sides are uppercase strings
             exact_matches = self.df[
-                self.df['SKU_COD'].astype(str).str.upper() == sku_query
+                self.df['SKU_COD'].astype(str).str.strip().str.upper() == sku_query
             ]
             if len(exact_matches) > 0:
                 logger.info(f"✅ Found {len(exact_matches)} exact SKU matches")
@@ -387,30 +403,8 @@ class HybridSearchEngine:
     
     def _get_image_path(self, filename_root: str) -> Optional[str]:
         """Get the actual image path for a filename_root"""
-        if not filename_root:
-            return None
-        
-        # Try both .jpg and .JPG extensions
-        for ext in ['.jpg', '.JPG']:
-            # Look for files starting with filename_root
-            import glob
-            pattern = f"pictures/{filename_root}_*{ext}"
-            matches = glob.glob(pattern)
-            if matches:
-                logger.debug(f"🖼️  Found image for {filename_root}: {matches[0]}")
-                return matches[0]  # Return first match
-        
-        # If no match found, try just the filename_root + extension
-        for ext in ['.jpg', '.JPG']:
-            import glob
-            pattern = f"pictures/{filename_root}{ext}"
-            matches = glob.glob(pattern)
-            if matches:
-                logger.debug(f"🖼️  Found direct image for {filename_root}: {matches[0]}")
-                return matches[0]
-        
-        logger.warning(f"⚠️  No image found for filename_root: {filename_root}")
-        return None
+        # Use data_loader's implementation which handles path normalization
+        return data_loader.get_image_path(filename_root)
     
     def get_filter_options(self) -> Dict[str, List]:
         """Get unique values for each filterable column"""

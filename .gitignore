@@ -45,7 +45,10 @@ ehthumbs.db
 Thumbs.db
 
 # Uploads directory (contains user uploaded files)
+pictures/
 uploads/
+loras/
+indexes/
 
 # Logs
 *.log

@@ -56,6 +56,6 @@ export MKL_NUM_THREADS=1
 echo -e "${GREEN}📊 This may take a few minutes to load the model and data...${NC}"
 echo -e "${GREEN}🌐 Web interface will be available at: http://127.0.0.1:8080${NC}"
 
-# Run the application from parent directory
-cd "$(dirname "$0")/.."
-python -m uvicorn old_app.app:app --host 127.0.0.1 --port 8080 --reload 
+# Run the application from current directory
+cd "$(dirname "$0")"
+python -m uvicorn app:app --host 127.0.0.1 --port 8080 --reload 
