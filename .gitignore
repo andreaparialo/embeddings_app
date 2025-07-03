@@ -7,6 +7,7 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+db_pictures/
 downloads/
 eggs/
 .eggs/
@@ -49,6 +50,7 @@ pictures/
 uploads/
 loras/
 indexes/
+db_pictures_512/
 
 # Logs
 *.log
