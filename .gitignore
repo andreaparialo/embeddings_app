@@ -19,6 +19,9 @@ parts/
 sdist/
 var/
 wheels/
+Miniconda3-latest-Linux-x86_64.sh.1
+Miniconda3-latest-Linux-x86_64.sh.2
+Miniconda3-latest-Linux-x86_64.sh.3
 *.egg-info/
 .installed.cfg
 *.egg
@@ -1697,3 +1700,11 @@ delta_images_to_index/20887408079O_O00.jpg
 delta_images_to_index/20890300103X_O00.jpg
 delta_images_to_index/20890908079O_O00.jpg
 delta_images_to_index/20891208079O_O00.jpg
+
+# Ignore large files and directories
+*.sh
+*.sh.*
+Miniconda3-latest-Linux-x86_64.sh*
+db_pictures_512/
+IAN/
+ultimepics/
