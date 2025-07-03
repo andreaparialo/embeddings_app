@@ -73,6 +73,39 @@
         </div>
         {% endif %}
 
+        <!-- Index Selection -->
+        {% if indexes %}
+        <div class="card search-card">
+            <div class="card-header">
+                <h5><i class="fas fa-database me-2"></i>FAISS Index Configuration</h5>
+            </div>
+            <div class="card-body">
+                <form id="index-form">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <label for="index-select" class="form-label">Select Index:</label>
+                            <select class="form-select" id="index-select" name="index_id">
+                                {% for index in indexes %}
+                                <option value="{{ index.id }}" {% if index.id == current_index_id %}selected{% endif %}>
+                                    {{ index.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                            {% if current_index %}
+                            <small class="text-muted">{{ current_index.description }}</small>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button type="submit" class="btn btn-secondary">
+                                <i class="fas fa-sync-alt me-2"></i>Switch Index
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endif %}
+
         <!-- Search by Image -->
         <div class="card search-card">
             <div class="card-header">
@@ -328,7 +361,7 @@
             const container = document.getElementById(containerId);
             container.innerHTML = '';
             
-            const mainFilters = ['BRAND_DES', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'BRAND_CLUSTER'];
+            const mainFilters = ['BRAND_DES', 'BRAND_CLUSTER', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'COLOR', 'SHAPE_SEMI_GROUPED'];
             
             for (const [column, options] of Object.entries(filterOptions)) {
                 if (options.length > 500) continue; // Skip columns with too many options
@@ -429,8 +462,13 @@
                     ${similarityHtml}
                     <p class="card-text">
                         <strong>Brand:</strong> ${result.BRAND_DES || 'N/A'}<br>
+                        <strong>Brand Cluster:</strong> ${result.BRAND_CLUSTER || 'N/A'}<br>
                         <strong>Gender:</strong> ${result.USERGENDER_DES || 'N/A'}<br>
-                        <strong>Color:</strong> ${result.COLOR_FAMILY_1_DES || 'N/A'}<br>
+                        <strong>Color Family:</strong> ${result.COLOR_FAMILY_1_DES || 'N/A'}<br>
+                        <strong>Color Code:</strong> ${result.COLOR || 'N/A'}<br>
+                        <strong>Shape:</strong> ${result.SHAPE_SEMI_GROUPED || 'N/A'}<br>
+                        <strong>Bridge Length:</strong> ${result.BRIDGE_LENGTH || 'N/A'}<br>
+                        <strong>Lens Base:</strong> ${result.LENS_BASE || 'N/A'}<br>
                         <strong>Price:</strong> ${result.ACT_SKU_PRICE_VAL || 'N/A'}
                     </p>
                     <small class="text-muted">Filename: ${result.filename_root || 'N/A'}</small>
@@ -471,7 +509,8 @@
             container.innerHTML = '';
             
             // Main columns that are most useful for matching
-            const mainColumns = ['BRAND_DES', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'BRAND_CLUSTER', 'PRODUCT_TYPE_COD'];
+            const mainColumns = ['BRAND_DES', 'BRAND_CLUSTER', 'USERGENDER_DES', 'COLOR_FAMILY_1_DES', 'PRODUCT_TYPE_COD', 
+                               'COLOR', 'CTM_FIRST_TEMPLE_MATERIAL_DES', 'SHAPE_SEMI_GROUPED', 'BRIDGE_LENGTH', 'LENS_BASE', 'LENSHEIGHTVAL'];
             
             // Create checkboxes for main columns
             mainColumns.forEach(column => {
@@ -576,6 +615,37 @@
                 hideLoading();
             }
         });
+        
+        // Index form handler
+        const indexForm = document.getElementById('index-form');
+        if (indexForm) {
+            indexForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                showLoading();
+                
+                const formData = new FormData(e.target);
+                
+                try {
+                    const response = await fetch('/api/change-index', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const result = await response.json();
+                    
+                    if (response.ok) {
+                        alert(`Success: ${result.message}`);
+                        location.reload();
+                    } else {
+                        alert(`Error: ${result.error}`);
+                    }
+                } catch (error) {
+                    alert(`Error: ${error.message}`);
+                } finally {
+                    hideLoading();
+                }
+            });
+        }
         
         document.getElementById('image-search-form').addEventListener('submit', async (e) => {
             e.preventDefault();

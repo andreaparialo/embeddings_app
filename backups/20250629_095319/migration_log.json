@@ -1,0 +1,19 @@
+{
+  "timestamp": "20250629_095319",
+  "backup_dir": "backups/20250629_095319",
+  "status": "success",
+  "changes": {
+    "new_columns": [
+      "LENSHEIGHTVAL",
+      "USERGENDER_DES_PRECISE"
+    ],
+    "updated_columns": [
+      "FRONT_LENGTH_VAL",
+      "FRONT_HEIGHT_VAL"
+    ],
+    "data_types_changed": {
+      "FRONT_LENGTH_VAL": "int64 \u2192 float64",
+      "FRONT_HEIGHT_VAL": "int64 \u2192 float64"
+    }
+  }
+}

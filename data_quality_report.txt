@@ -1,0 +1,33 @@
+DATA QUALITY REPORT
+================================================================================
+
+Total rows: 12,601
+Total columns: 25
+Memory usage: 14.61 MB
+
+Column data types:
+  SKU_COD: object
+  BRAND_DES: object
+  MD_SKU_STATUS_COD: object
+  PRODUCT_TYPE_COD: object
+  COLOR: object
+  COLOR_FAMILY_1_DES: object
+  ZLENSCODE: object
+  MODEL_COD: int64
+  filename_root: object
+  USERGENDER_DES: object
+  CTM_FIRST_FRONT_MATERIAL_DES: object
+  CTM_FIRST_TEMPLE_MATERIAL_DES: object
+  SIZE_COD: int64
+  FRONT_LENGTH_VAL: int64
+  BRIDGE_LENGTH_VAL: int64
+  FRONT_HEIGHT_VAL: int64
+  STARTSKU_DATE: datetime64[ns]
+  ACT_SKU_PRICE_VAL: float64
+  MACRO_SHAPE_AWS: object
+  GRANULAR_SHAPE_AWS: object
+  SHAPE_SEMI_GROUPED: object
+  FlatTop_FlatTop_1: object
+  browline_browline_1: object
+  bridge_Bridge_1: object
+  RIM_TYPE_DES: object

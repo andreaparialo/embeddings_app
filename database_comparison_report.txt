@@ -1,0 +1,64 @@
+DATABASE COMPARISON REPORT
+==================================================
+
+Original DB: (34431, 40)
+New DB: (12601, 27)
+
+NEW COLUMNS:
+  - BRIDGE_LENGTH_VAL
+  - COLOR
+  - CTM_FIRST_TEMPLE_MATERIAL_DES
+  - LENSHEIGHTVAL
+  - SHAPE_SEMI_GROUPED
+  - USERGENDER_DES_PRECISE
+
+REMOVED COLUMNS:
+  - ACT_SKU_PRICE_RANGE_DES
+  - CONCEPT_01_DES
+  - CONCEPT_02_DES
+  - FIRST_FRONT_MAT_DES
+  - FITTING_DES
+  - FLG_SECOND_CHOICE
+  - FlatTop_Confidence_1
+  - GRANULAR_SHAPE_DES
+  - LENS_BASE_DES
+  - MACRO_SHAPE_DES
+  - MATERIALGROUP_DES
+  - PORTFOLIO_PRICE_RANGE_DES
+  - SKU_STATUS_HIST_DAILY_COD
+  - SKU_URL_MEDIUM
+  - SPECIAL_SKU_FLG
+  - TEMPLE_LENGTH_VAL
+  - ZCOLFAM1
+  - bridge_Confidence_1
+  - browline_Confidence_1
+
+
+ALL COLUMNS IN NEW DB:
+  - ACT_SKU_PRICE_VAL: float64
+  - BRAND_DES: object
+  - BRIDGE_LENGTH_VAL: int64
+  - COLOR: object
+  - COLOR_FAMILY_1_DES: object
+  - CTM_FIRST_FRONT_MATERIAL_DES: object
+  - CTM_FIRST_TEMPLE_MATERIAL_DES: object
+  - FRONT_HEIGHT_VAL: float64
+  - FRONT_LENGTH_VAL: float64
+  - FlatTop_FlatTop_1: object
+  - GRANULAR_SHAPE_AWS: object
+  - LENSHEIGHTVAL: float64
+  - MACRO_SHAPE_AWS: object
+  - MD_SKU_STATUS_COD: object
+  - MODEL_COD: int64
+  - PRODUCT_TYPE_COD: object
+  - RIM_TYPE_DES: object
+  - SHAPE_SEMI_GROUPED: object
+  - SIZE_COD: int64
+  - SKU_COD: object
+  - STARTSKU_DATE: object
+  - USERGENDER_DES: object
+  - USERGENDER_DES_PRECISE: object
+  - ZLENSCODE: object
+  - bridge_Bridge_1: object
+  - browline_browline_1: object
+  - filename_root: object

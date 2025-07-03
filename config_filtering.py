@@ -34,24 +34,33 @@ ENABLE_BASELINE_DATE_FILTER = True
 # PRE-FILTERS - Applied before similarity search (after baseline filters)
 # ============================================================================
 # Columns that should be used for pre-filtering (before similarity search)
-# These should be high-level category columns that significantly reduce the search space
-# but still leave enough products for meaningful similarity comparison
+# These are filename_root level filters - attributes shared by all SKUs with the same image
+# All pre-filter columns are treated as TEXT for comparison
 PREFILTER_COLUMNS = [
-    'BRAND_DES',           # Brand is critical for category definition
-    'USERGENDER_DES',      # Gender significantly affects product style
+    'BRAND_DES',
+    'BRAND_CLUSTER',
+    'MD_SKU_STATUS_COD',
     'PRODUCT_TYPE_COD',
-    'GRANULAR_SHAPE_AWS',
-    'MACRO_SHAPE_AWS',
-    'FITTING_DES',
-    'RIM_TYPE_DES',
+    'COLOR',
+    'COLOR_FAMILY_1_DES',
+    'ZLENSCODE',
+    'USERGENDER_DES',
     'CTM_FIRST_FRONT_MATERIAL_DES',
+    'CTM_FIRST_TEMPLE_MATERIAL_DES',
+    'MACRO_SHAPE_AWS',
+    'GRANULAR_SHAPE_AWS',
+    'SHAPE_SEMI_GROUPED',
+    'FlatTop_FlatTop_1',
+    'browline_browline_1',
+    'bridge_Bridge_1',
+    'RIM_TYPE_DES',
+    'USERGENDER_DES_PRECISE',
 ]
 
 # Additional columns that can be added to pre-filtering if needed
 # (uncomment to activate)
 OPTIONAL_PREFILTER_COLUMNS = [
-    # 'FITTING_DES',       # Could be used if fitting is critical
-    # 'RIM_TYPE_DES',      # Could be used if rim type is essential
+    # Add any optional pre-filter columns here
 ]
 
 # ============================================================================
@@ -69,19 +78,23 @@ MIN_EMBEDDINGS_AFTER_PREFILTER = 50
 
 # Maximum number of columns allowed for pre-filtering
 # (to prevent over-restrictive filtering)
-MAX_PREFILTER_COLUMNS = 10  # Increased to allow more pre-filter columns
+MAX_PREFILTER_COLUMNS = 20  # Increased to allow all filename_root level columns
 
 # ============================================================================
-# RANGE FILTERING - For numeric columns that should use range matching
+# POST-FILTERS - SKU-specific numeric columns (applied after similarity search)
 # ============================================================================
-# Columns that should use range-based filtering instead of exact matching
+# These are SKU-specific attributes that can vary between SKUs with the same image
+# All post-filter columns are treated as FLOAT for numeric range comparison
 # Note: Values must be numeric or convertible to numeric (European comma decimals are supported)
 RANGE_FILTER_COLUMNS = {
     'ACT_SKU_PRICE_VAL': 0.25,      # ±25% range for price
-    'FRONT_LENGTH_VAL': 0.10,        # ±10% range for front length
-    'TEMPLE_LENGTH_VAL': 0.10,       # ±10% range for temple length  
     'SIZE_COD': 0.05,                # ±5% range for size
+    'FRONT_LENGTH_VAL': 0.10,        # ±10% range for front length
+    'BRIDGE_LENGTH_VAL': 0.10,       # ±10% range for bridge length
+    'BRIDGE_LENGTH': 0.10,           # ±10% range for new bridge length column
+    'LENS_BASE': 0.15,               # ±15% range for lens base
     'FRONT_HEIGHT_VAL': 0.10,        # ±10% range for front height
+    'LENSHEIGHTVAL': 0.15,           # ±15% range for lens height
 }
 
 # Default range percentage if column not specified above

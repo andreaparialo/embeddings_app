@@ -36,7 +36,7 @@ class LoRAImageSimilarityEngine:
     Properly loads and uses LoRA adapters for improved performance.
     """
     
-    def __init__(self, base_model_path: str = "./gme-Qwen2-VL-7B-Instruct", 
+    def __init__(self, base_model_path: str = "Alibaba-NLP/gme-Qwen2-VL-7B-Instruct", 
                  lora_path: str = None, device: str = "auto"):
         """
         Initialize the LoRA similarity engine.
@@ -295,7 +295,7 @@ def create_lora_engine(checkpoint_path: str) -> LoRAImageSimilarityEngine:
     Returns:
         LoRAImageSimilarityEngine instance
     """
-    base_model_path = "./gme-Qwen2-VL-7B-Instruct"
+    base_model_path = "Alibaba-NLP/gme-Qwen2-VL-7B-Instruct"
     return LoRAImageSimilarityEngine(
         base_model_path=base_model_path,
         lora_path=checkpoint_path

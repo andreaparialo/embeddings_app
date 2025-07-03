@@ -21,6 +21,9 @@ class DataLoader:
         self.metadata = None
         self.filename_to_idx = {}
         self.idx_to_filename_root = {}
+        self.available_indexes = {}  # Store available index configurations
+        self.current_index_id = None  # Track current loaded index
+        self.pictures_dir = "pictures"  # Default pictures directory
         # Check for force CPU mode
         force_cpu = os.environ.get('FORCE_CPU_FAISS', '').lower() in ['true', '1', 'yes']
         
@@ -34,46 +37,117 @@ class DataLoader:
         else:
             logger.warning("⚠️  GPU support not available, falling back to CPU")
         
+        # Load index configuration if available
+        self._load_index_config()
+    
+    def _load_index_config(self):
+        """Load index configuration from index_config.json"""
+        config_path = "index_config.json"
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    for index_info in config.get('indexes', []):
+                        self.available_indexes[index_info['id']] = index_info
+                    logger.info(f"📚 Loaded {len(self.available_indexes)} index configurations")
+            except Exception as e:
+                logger.warning(f"Could not load index config: {e}")
+        
     def load_csv(self, csv_path: str) -> pd.DataFrame:
-        """Load CSV with proper encoding handling"""
+        """Load CSV with proper encoding handling and data type conversion"""
         try:
             # Try different encodings
             for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
                 try:
                     self.df = pd.read_csv(csv_path, encoding=encoding)
                     logger.info(f"Successfully loaded CSV with {encoding} encoding")
-                    logger.info(f"CSV shape: {self.df.shape}")
-                    logger.info(f"Columns: {list(self.df.columns)}")
-                    return self.df
+                    break
                 except UnicodeDecodeError:
                     continue
-            raise Exception("Could not decode CSV with any common encoding")
+            else:
+                raise Exception("Could not decode CSV with any common encoding")
+            
+            # Apply data type conversions based on config_filtering
+            import config_filtering
+            
+            # Convert pre-filter columns to string
+            for col in config_filtering.PREFILTER_COLUMNS:
+                if col in self.df.columns:
+                    self.df[col] = self.df[col].fillna('').astype(str)
+                    logger.debug(f"Converted {col} to string type")
+            
+            # Convert post-filter numeric columns to float
+            for col in config_filtering.RANGE_FILTER_COLUMNS.keys():
+                if col in self.df.columns:
+                    # Handle European decimal format (comma to dot)
+                    if self.df[col].dtype == 'object':
+                        self.df[col] = self.df[col].str.replace(',', '.', regex=False)
+                    # Convert to numeric, invalid values become NaN
+                    self.df[col] = pd.to_numeric(self.df[col], errors='coerce')
+                    logger.debug(f"Converted {col} to float type")
+            
+            logger.info(f"CSV shape: {self.df.shape}")
+            logger.info(f"Columns: {list(self.df.columns)}")
+            logger.info(f"Data type conversions applied based on filter configuration")
+            
+            return self.df
+            
         except Exception as e:
             logger.error(f"Error loading CSV: {e}")
             raise
     
-    def load_faiss_index(self, index_dir: str, checkpoint: str = "1095") -> bool:
-        """Load FAISS index and metadata with GPU acceleration"""
+    def load_faiss_index(self, index_dir: str = None, checkpoint: str = "1095", index_id: str = None) -> bool:
+        """Load FAISS index and metadata with GPU acceleration
+        
+        Args:
+            index_dir: Directory containing indexes (deprecated, use index_id)
+            checkpoint: LoRA checkpoint number (deprecated)
+            index_id: ID of index from index_config.json to load
+        """
         try:
-            # Load FAISS index - try different naming conventions
-            index_paths = [
-                os.path.join(index_dir, "v11_complete_merged_20250625_115302.faiss"),  # New merged index
-                os.path.join(index_dir, f"v11_o00_index_{checkpoint}.faiss"),         # Checkpoint-specific
-                os.path.join(index_dir, "v11_o00_index.faiss")                        # Fallback
-            ]
-            
+            # Determine which index to load
             cpu_index = None
-            used_path = None
             
-            for index_path in index_paths:
+            # If index_id is provided, use it to load from configuration
+            if index_id and index_id in self.available_indexes:
+                logger.info(f"📚 Loading index from configuration: {index_id}")
+                index_config = self.available_indexes[index_id]
+                index_path = index_config['index_path']
+                embeddings_path = index_config['embeddings_path']
+                metadata_path = index_config['metadata_path']
+                self.pictures_dir = index_config.get('image_folder', 'pictures')
+                self.current_index_id = index_id
+                
+                # Load the index directly
                 if os.path.exists(index_path):
                     cpu_index = faiss.read_index(index_path)
-                    used_path = index_path
                     logger.info(f"Loaded FAISS index from {index_path}: {cpu_index.ntotal} vectors")
-                    break
-            
-            if cpu_index is None:
-                raise FileNotFoundError("No suitable FAISS index found")
+                else:
+                    logger.error(f"Index file not found: {index_path}")
+                    return False
+            else:
+                # Fallback to legacy loading method
+                if not index_dir:
+                    index_dir = "indexes"
+                    
+                # Load FAISS index - try different naming conventions
+                index_paths = [
+                    os.path.join(index_dir, "v11_complete_merged_20250625_115302.faiss"),  # New merged index
+                    os.path.join(index_dir, f"v11_o00_index_{checkpoint}.faiss"),         # Checkpoint-specific
+                    os.path.join(index_dir, "v11_o00_index.faiss")                        # Fallback
+                ]
+                
+                used_path = None
+                
+                for index_path in index_paths:
+                    if os.path.exists(index_path):
+                        cpu_index = faiss.read_index(index_path)
+                        used_path = index_path
+                        logger.info(f"Loaded FAISS index from {index_path}: {cpu_index.ntotal} vectors")
+                        break
+                
+                if cpu_index is None:
+                    raise FileNotFoundError("No suitable FAISS index found")
             
             # Check GPU memory before attempting GPU initialization
             if self.use_gpu:
@@ -197,55 +271,78 @@ class DataLoader:
                 self.index = cpu_index
                 logger.info("Using CPU FAISS index")
             
-            # Load embeddings - try different naming conventions based on which index was loaded
+            # Load embeddings and metadata
             logger.info("Loading embeddings...")
-            embeddings_paths = [
-                os.path.join(index_dir, "v11_complete_merged_20250625_115302_embeddings.npy"),  # New merged embeddings
-                os.path.join(index_dir, f"v11_o00_index_{checkpoint}_embeddings.npy"),          # Checkpoint-specific
-                os.path.join(index_dir, "v11_o00_index_embeddings.npy")                         # Fallback
-            ]
             
-            embeddings_loaded = False
-            for embeddings_path in embeddings_paths:
+            # If we loaded from index config, we already have the paths
+            if index_id and index_id in self.available_indexes:
+                embeddings_loaded = False
                 if os.path.exists(embeddings_path):
                     try:
-                        logger.info(f"Attempting to load embeddings from {embeddings_path}")
                         self.embeddings = np.load(embeddings_path)
                         logger.info(f"✅ Loaded embeddings from {embeddings_path}: {self.embeddings.shape}")
                         embeddings_loaded = True
-                        break
                     except Exception as e:
-                        logger.warning(f"Failed to load embeddings from {embeddings_path}: {e}")
-                        continue
-            
-            if not embeddings_loaded:
-                logger.warning("⚠️  No embeddings file found - some features may not work")
-            
-            # Load metadata - try different naming conventions based on which index was loaded
-            logger.info("Loading metadata...")
-            metadata_paths = [
-                os.path.join(index_dir, "v11_complete_merged_20250625_115302_metadata_fixed.json"),  # Fixed metadata (priority)
-                os.path.join(index_dir, "v11_complete_merged_20250625_115302_metadata.json"),       # Original merged metadata
-                os.path.join(index_dir, f"v11_o00_index_{checkpoint}_metadata.json"),              # Checkpoint-specific
-                os.path.join(index_dir, "v11_o00_index_metadata.json")                             # Fallback
-            ]
-            
-            metadata_loaded = False
-            for metadata_path in metadata_paths:
+                        logger.warning(f"Failed to load embeddings: {e}")
+                
+                metadata_loaded = False
                 if os.path.exists(metadata_path):
                     try:
-                        logger.info(f"Attempting to load metadata from {metadata_path}")
                         with open(metadata_path, 'r') as f:
                             self.metadata = json.load(f)
                         logger.info(f"✅ Loaded metadata from {metadata_path}")
                         metadata_loaded = True
-                        break
                     except Exception as e:
-                        logger.warning(f"Failed to load metadata from {metadata_path}: {e}")
-                        continue
-            
-            if not metadata_loaded:
-                logger.warning("⚠️  No metadata file found - filename mappings may not work properly")
+                        logger.warning(f"Failed to load metadata: {e}")
+            else:
+                # Legacy loading method
+                embeddings_paths = [
+                    os.path.join(index_dir, "v11_complete_merged_20250625_115302_embeddings.npy"),  # New merged embeddings
+                    os.path.join(index_dir, f"v11_o00_index_{checkpoint}_embeddings.npy"),          # Checkpoint-specific
+                    os.path.join(index_dir, "v11_o00_index_embeddings.npy")                         # Fallback
+                ]
+                
+                embeddings_loaded = False
+                for embeddings_path in embeddings_paths:
+                    if os.path.exists(embeddings_path):
+                        try:
+                            logger.info(f"Attempting to load embeddings from {embeddings_path}")
+                            self.embeddings = np.load(embeddings_path)
+                            logger.info(f"✅ Loaded embeddings from {embeddings_path}: {self.embeddings.shape}")
+                            embeddings_loaded = True
+                            break
+                        except Exception as e:
+                            logger.warning(f"Failed to load embeddings from {embeddings_path}: {e}")
+                            continue
+                
+                if not embeddings_loaded:
+                    logger.warning("⚠️  No embeddings file found - some features may not work")
+                
+                # Load metadata - try different naming conventions based on which index was loaded
+                logger.info("Loading metadata...")
+                metadata_paths = [
+                    os.path.join(index_dir, "v11_complete_merged_20250625_115302_metadata_fixed.json"),  # Fixed metadata (priority)
+                    os.path.join(index_dir, "v11_complete_merged_20250625_115302_metadata.json"),       # Original merged metadata
+                    os.path.join(index_dir, f"v11_o00_index_{checkpoint}_metadata.json"),              # Checkpoint-specific
+                    os.path.join(index_dir, "v11_o00_index_metadata.json")                             # Fallback
+                ]
+                
+                metadata_loaded = False
+                for metadata_path in metadata_paths:
+                    if os.path.exists(metadata_path):
+                        try:
+                            logger.info(f"Attempting to load metadata from {metadata_path}")
+                            with open(metadata_path, 'r') as f:
+                                self.metadata = json.load(f)
+                            logger.info(f"✅ Loaded metadata from {metadata_path}")
+                            metadata_loaded = True
+                            break
+                        except Exception as e:
+                            logger.warning(f"Failed to load metadata from {metadata_path}: {e}")
+                            continue
+                
+                if not metadata_loaded:
+                    logger.warning("⚠️  No metadata file found - filename mappings may not work properly")
             
             # Create filename mappings
             logger.info("Creating filename mappings...")
@@ -268,33 +365,28 @@ class DataLoader:
         if not self.metadata or 'image_paths' not in self.metadata:
             return
         
-        pictures_dir = "pictures"
-        
-        # Get all actual picture files
-        jpg_files = glob.glob(os.path.join(pictures_dir, "*.jpg"))
-        JPG_files = glob.glob(os.path.join(pictures_dir, "*.JPG"))
-        all_picture_files = jpg_files + JPG_files
-        
-        # Create a mapping of filename_root to actual file path
-        filename_root_to_path = {}
-        for file_path in all_picture_files:
-            filename = os.path.basename(file_path)
-            # Extract filename_root (everything before first underscore)
-            filename_root = filename.split('_')[0]
-            filename_root_to_path[filename_root] = file_path
-        
-        # Map index positions to filename_roots
+        # Map index positions to filename_roots directly from metadata
         for idx, image_path in enumerate(self.metadata['image_paths']):
             # Extract filename from path
             filename = os.path.basename(image_path)
-            filename_root = filename.split('_')[0]
+            # Remove extension to get filename_root
+            filename_root = os.path.splitext(filename)[0]
             
-            # Check if we have this file in our pictures directory
-            if filename_root in filename_root_to_path:
-                self.filename_to_idx[filename_root] = idx
-                self.idx_to_filename_root[idx] = filename_root
+            # Store the mapping
+            self.filename_to_idx[filename_root] = idx
+            self.idx_to_filename_root[idx] = filename_root
+            
+            # Also store uppercase version for case-insensitive matching
+            self.filename_to_idx[filename_root.upper()] = idx
+            
+            # Store without the last character if it's a letter (for SKU variations)
+            if filename_root and filename_root[-1].isalpha():
+                base_root = filename_root[:-1]
+                if base_root not in self.filename_to_idx:
+                    self.filename_to_idx[base_root] = idx
+                    self.filename_to_idx[base_root.upper()] = idx
         
-        logger.info(f"Created mappings for {len(self.filename_to_idx)} files")
+        logger.info(f"Created mappings for {len(self.idx_to_filename_root)} files ({len(self.filename_to_idx)} total mappings with variations)")
     
     def get_filter_columns(self) -> List[str]:
         """Get all available filter columns from CSV"""
@@ -308,8 +400,13 @@ class DataLoader:
             'FlatTop_FlatTop_1',
             'browline_browline_1',
             'bridge_Bridge_1',
-            'LENS_BASE_DES',
-            'RIM_TYPE_DES'
+            'RIM_TYPE_DES',
+            'SHAPE_SEMI_GROUPED',  # New column
+            'COLOR',  # New column
+            'CTM_FIRST_TEMPLE_MATERIAL_DES',  # New column
+            'BRIDGE_LENGTH_VAL',  # New column (replaces TEMPLE_LENGTH_VAL)
+            'LENSHEIGHTVAL',  # New column from migration
+            'USERGENDER_DES_PRECISE'  # New column from migration
         ]
         
         # Exclude non-filter columns
@@ -396,6 +493,25 @@ class DataLoader:
             info["gpus"].append(gpu_info)
         
         return info
+    
+    def get_available_indexes(self) -> List[Dict]:
+        """Get list of available indexes from configuration"""
+        return list(self.available_indexes.values())
+    
+    def get_current_index_info(self) -> Optional[Dict]:
+        """Get information about the currently loaded index"""
+        if self.current_index_id and self.current_index_id in self.available_indexes:
+            return self.available_indexes[self.current_index_id]
+        return None
+    
+    def switch_index(self, index_id: str) -> bool:
+        """Switch to a different index"""
+        if index_id not in self.available_indexes:
+            logger.error(f"Index {index_id} not found in configuration")
+            return False
+        
+        logger.info(f"🔄 Switching to index: {index_id}")
+        return self.load_faiss_index(index_id=index_id)
 
 # Global instance
 data_loader = DataLoader() 

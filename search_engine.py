@@ -14,19 +14,24 @@ class HybridSearchEngine:
         self.gme_loaded = False
         self.checkpoint = "1095"
     
-    def initialize(self, csv_path: str, index_dir: str = "indexes", checkpoint: str = "1095"):
+    def initialize(self, csv_path: str, index_dir: str = "indexes", checkpoint: str = "1095", index_id: str = None):
         """Initialize the search engine with CSV data and FAISS index"""
         try:
             logger.info("🚀 Initializing Hybrid Search Engine...")
             logger.info(f"📊 Loading CSV data from: {csv_path}")
-            logger.info(f"📁 Loading FAISS index from: {index_dir}")
-            logger.info(f"🎯 Using checkpoint: {checkpoint}")
+            
+            # If index_id is provided, use it
+            if index_id:
+                logger.info(f"📚 Using index configuration: {index_id}")
+            else:
+                logger.info(f"📁 Loading FAISS index from: {index_dir}")
+                logger.info(f"🎯 Using checkpoint: {checkpoint}")
             
             # Load CSV data
             self.df = data_loader.load_csv(csv_path)
             
             # Load FAISS index
-            if not data_loader.load_faiss_index(index_dir, checkpoint):
+            if not data_loader.load_faiss_index(index_dir, checkpoint, index_id):
                 return False
             
             # Store checkpoint for lazy loading GME model later

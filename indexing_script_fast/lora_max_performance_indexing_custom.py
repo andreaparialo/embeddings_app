@@ -4,6 +4,10 @@ LoRA EXTREME PERFORMANCE MODE - Maximum GPU utilization with fine-tuned models
 CUSTOMIZED VERSION - Batch size 128, custom save location
 """
 
+import os
+# Fix tokenizers parallelism warning when using multiple GPUs
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import torch
 import gc
 import numpy as np
@@ -17,7 +21,6 @@ import torchvision.io as tvio
 import torchvision.transforms.functional as F
 from tqdm import tqdm
 import sys
-import os
 
 from lora_similarity_engine import LoRAImageSimilarityEngine, create_lora_engine
 from lora_model_utils import get_available_lora_models, get_latest_lora_model, find_lora_model_by_version, list_lora_models_summary
@@ -214,7 +217,7 @@ class LoRAFastIndexingEngine:
         
         # Load LoRA model with optimized engine
         print("📥 Loading LoRA model for indexing...")
-        base_model_path = "gme-Qwen2-VL-7B-Instruct"  # Local path in this directory
+        base_model_path = "/home/ubuntu/SPEEDINGTHEPROCESS/old_app/gme-Qwen2-VL-7B-Instruct"  # Local path
         self.engine = OptimizedLoRAEngine(
             base_model_path=base_model_path,
             lora_path=lora_checkpoint_path

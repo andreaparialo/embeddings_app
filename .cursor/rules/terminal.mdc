@@ -1,0 +1,7 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+Don't forget to always activate conda if you didn't already before launching any script: "source ~/miniconda3/etc/profile.d/conda.sh && conda activate faiss_env"
+

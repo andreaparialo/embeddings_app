@@ -1,0 +1,62 @@
+{
+  "indexes": [
+    {
+      "id": "v11_merged_latest",
+      "name": "Full Database (Mixed Sizes)",
+      "description": "All products from new database with original image sizes",
+      "index_path": "indexes/v11_merged_latest.faiss",
+      "embeddings_path": "indexes/v11_merged_latest_embeddings.npy",
+      "metadata_path": "indexes/v11_merged_latest_metadata.json",
+      "image_folder": "pictures",
+      "image_size": "variable",
+      "embedding_dim": 3584,
+      "model": "gme-Qwen2-VL-7B + LoRA v11-1095",
+      "default": false
+    },
+    {
+      "id": "v11_1095_db_pictures_512",
+      "name": "DB Pictures 512x512",
+      "description": "Standardized 512x512 images with white padding",
+      "index_path": "indexes/v11_1095_db_pictures_512.faiss",
+      "embeddings_path": "indexes/v11_1095_db_pictures_512_embeddings.npy",
+      "metadata_path": "indexes/v11_1095_db_pictures_512_metadata.json",
+      "image_folder": "db_pictures_512",
+      "image_size": "512x512",
+      "embedding_dim": 3584,
+      "model": "gme-Qwen2-VL-7B + LoRA v11-1095",
+      "default": false
+    },
+    {
+      "id": "v11_1095_db_pictures_512_merged_2",
+      "name": "DB Pictures 512x512 + Delta (2)",
+      "description": "Original 512x512 images plus new images starting with 2",
+      "index_path": "indexes/v11_1095_db_pictures_512_merged_2_20250703_121651.faiss",
+      "embeddings_path": "indexes/v11_1095_db_pictures_512_merged_2_20250703_121651_embeddings.npy",
+      "metadata_path": "indexes/v11_1095_db_pictures_512_merged_2_20250703_121651_metadata.json",
+      "image_folder": "db_pictures_512",
+      "image_size": "512x512",
+      "embedding_dim": 3584,
+      "model": "gme-Qwen2-VL-7B + LoRA v11-1095",
+      "default": false
+    },
+    {
+      "id": "v11_1095_db_pictures_512_merged_final",
+      "name": "DB Pictures 512x512 Complete",
+      "description": "All 512x512 images: original (11,531) + new from IAN (16,000)",
+      "index_path": "indexes/v11_1095_db_pictures_512_merged_final_20250703_125538.faiss",
+      "embeddings_path": "indexes/v11_1095_db_pictures_512_merged_final_20250703_125538_embeddings.npy",
+      "metadata_path": "indexes/v11_1095_db_pictures_512_merged_final_20250703_125538_metadata.json",
+      "image_folder": "db_pictures_512",
+      "image_size": "512x512",
+      "embedding_dim": 3584,
+      "model": "gme-Qwen2-VL-7B + LoRA v11-1095",
+      "default": true
+    }
+  ],
+  "database": {
+    "path": "database_results/DB_ACTIVE.csv",
+    "encoding": "utf-8"
+  },
+  "created": "2025-06-27T22:24:05.144056",
+  "version": "2.0"
+}

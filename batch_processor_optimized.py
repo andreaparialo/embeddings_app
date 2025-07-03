@@ -251,10 +251,15 @@ class OptimizedBatchProcessor:
                         'Similarity_Score': round(1 - similar_item.get('similarity_score', 0), 3)
                     }
                     
-                    # Add matching column values
-                    for col in matching_cols:
-                        result_row[f'Source_{col}'] = group_data['source_item'].get(col, '')
-                        result_row[f'Similar_{col}'] = similar_item.get(col, '')
+                    # Add ALL columns from source item (prefixed with Source_)
+                    for col, value in group_data['source_item'].items():
+                        if col not in ['Input_SKU', 'Similar_SKU', 'Similarity_Score']:  # Avoid duplicates
+                            result_row[f'Source_{col}'] = value
+                    
+                    # Add ALL columns from similar item (prefixed with Similar_)
+                    for col, value in similar_item.items():
+                        if col not in ['similarity_score', 'SKU_COD']:  # These are already included
+                            result_row[f'Similar_{col}'] = value
                     
                     all_results.append(result_row)
         
@@ -306,14 +311,6 @@ class OptimizedBatchProcessor:
             if variant in self.data_loader.filename_to_idx:
                 idx = self.data_loader.filename_to_idx[variant]
                 return self.data_loader.embeddings[idx]
-        
-        # Check filename mappings
-        for variant in variations:
-            if variant in self.data_loader.filename_mappings:
-                mapped_root = self.data_loader.filename_mappings[variant]
-                if mapped_root in self.data_loader.filename_to_idx:
-                    idx = self.data_loader.filename_to_idx[mapped_root]
-                    return self.data_loader.embeddings[idx]
         
         logger.warning(f"⚠️ No embedding found for {filename_root}")
         return None

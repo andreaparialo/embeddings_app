@@ -1,0 +1,87 @@
+{
+  "timestamp": "2025-06-27T20:14:08.814128",
+  "database": {
+    "old": "final_with_aws_shapes_enriched.csv",
+    "new": "DB_FINAL_SIMILARIT_270615.csv",
+    "old_rows": 34431,
+    "new_rows": 12601,
+    "old_columns": 40,
+    "new_columns": 25
+  },
+  "index": {
+    "old": "v11-20250620-105815",
+    "new": "v11_merged_latest",
+    "old_embeddings": 29136,
+    "new_embeddings": "TBD (9927 + delta)"
+  },
+  "columns": {
+    "removed": [
+      "MATERIALGROUP_DES",
+      "CONCEPT_01_DES",
+      "SKU_URL_MEDIUM",
+      "SPECIAL_SKU_FLG",
+      "TEMPLE_LENGTH_VAL",
+      "VAR_LENS_HEIGHT_VAL",
+      "LENS_BASE_DES",
+      "MACRO_SHAPE_DES",
+      "SKU_STATUS_HIST_DAILY_COD",
+      "VAR_LENS_BASE_VAL",
+      "GRANULAR_SHAPE_DES",
+      "VAR_TEMPLE_LENGTH_VAL",
+      "FlatTop_Confidence_1",
+      "FLG_SECOND_CHOICE",
+      "CONCEPT_02_DES",
+      "ACT_SKU_PRICE_RANGE_DES",
+      "FITTING_DES",
+      "FIRST_FRONT_MAT_DES",
+      "PORTFOLIO_PRICE_RANGE_DES"
+    ],
+    "added": [
+      "COLOR",
+      "CTM_FIRST_TEMPLE_MATERIAL_DES",
+      "SHAPE_SEMI_GROUPED",
+      "BRIDGE_LENGTH_VAL"
+    ],
+    "kept": [
+      "MACRO_SHAPE_AWS",
+      "MODEL_COD",
+      "SKU_COD",
+      "FlatTop_FlatTop_1",
+      "FRONT_HEIGHT_VAL",
+      "bridge_Bridge_1",
+      "COLOR_FAMILY_1_DES",
+      "MD_SKU_STATUS_COD",
+      "filename_root",
+      "CTM_FIRST_FRONT_MATERIAL_DES",
+      "ACT_SKU_PRICE_VAL",
+      "SIZE_COD",
+      "BRAND_DES",
+      "PRODUCT_TYPE_COD",
+      "ZLENSCODE",
+      "USERGENDER_DES",
+      "FRONT_LENGTH_VAL",
+      "GRANULAR_SHAPE_AWS",
+      "RIM_TYPE_DES",
+      "STARTSKU_DATE",
+      "browline_browline_1"
+    ]
+  },
+  "filters": {
+    "removed_filters": [
+      "FITTING_DES",
+      "LENS_BASE_DES",
+      "TEMPLE_LENGTH_VAL"
+    ],
+    "added_filters": [
+      "COLOR",
+      "CTM_FIRST_TEMPLE_MATERIAL_DES",
+      "SHAPE_SEMI_GROUPED",
+      "BRIDGE_LENGTH_VAL"
+    ],
+    "updated_logic": [
+      "COLOR column ensured as 3-digit text",
+      "BRIDGE_LENGTH_VAL replaces TEMPLE_LENGTH_VAL with \u00b110% tolerance",
+      "New shape and material filters added"
+    ]
+  }
+}

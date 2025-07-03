@@ -78,7 +78,7 @@ class OptimizedFAISSSearch:
             for col, value in filters.items():
                 if col in self.df.columns:
                     if value is not None and value != '':
-                        # Check if this column should use range filtering
+                        # Check if this column should use range filtering (post-filter numeric columns)
                         if config_filtering.is_range_filter_column(col):
                             # Range-based filtering for numeric columns
                             min_val, max_val = config_filtering.get_range_bounds(value, col)
@@ -91,17 +91,26 @@ class OptimizedFAISSSearch:
                                 col_values = pd.to_numeric(col_values, errors='coerce')
                                 mask &= (col_values >= min_val) & (col_values <= max_val)
                                 logger.debug(f"Applied range filter on {col}: {value} → [{min_val:.2f}, {max_val:.2f}]")
-                        elif isinstance(value, list):
-                            # Handle different types of filtering
-                            # Normalize list values for comparison
-                            normalized_values = [str(v).strip().upper() for v in value]
-                            # Compare with normalized column values
-                            mask &= self.df[col].fillna('').astype(str).str.strip().str.upper().isin(normalized_values)
+                        elif col in config_filtering.PREFILTER_COLUMNS:
+                            # Pre-filter columns are always treated as TEXT
+                            if isinstance(value, list):
+                                # Normalize list values for text comparison
+                                normalized_values = [str(v).strip().upper() for v in value]
+                                # Compare with normalized column values as text
+                                mask &= self.df[col].fillna('').astype(str).str.strip().str.upper().isin(normalized_values)
+                            else:
+                                # Single value text comparison with normalization
+                                normalized_value = str(value).strip().upper()
+                                # Compare with normalized column values as text
+                                mask &= (self.df[col].fillna('').astype(str).str.strip().str.upper() == normalized_value)
                         else:
-                            # Single value comparison with normalization
-                            normalized_value = str(value).strip().upper()
-                            # Compare with normalized column values
-                            mask &= (self.df[col].fillna('').astype(str).str.strip().str.upper() == normalized_value)
+                            # Other columns - default text comparison
+                            if isinstance(value, list):
+                                normalized_values = [str(v).strip().upper() for v in value]
+                                mask &= self.df[col].fillna('').astype(str).str.strip().str.upper().isin(normalized_values)
+                            else:
+                                normalized_value = str(value).strip().upper()
+                                mask &= (self.df[col].fillna('').astype(str).str.strip().str.upper() == normalized_value)
         
         # Get filtered dataframe
         filtered_df = self.df[mask]

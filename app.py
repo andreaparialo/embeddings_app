@@ -234,11 +234,25 @@ async def startup_event():
             except Exception as e:
                 logger.debug(f"Could not check FAISS installation: {e}")
         
-        # Use enriched database with shape information from final_for_similarity.csv
-        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
-        if search_engine.initialize(csv_path):
-            INITIALIZATION_STATUS = {"initialized": True, "message": "Search engine initialized successfully"}
-            logger.info("Search engine initialized on startup")
+        # Use new database with reduced products
+        csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
+        
+        # Get default index from configuration
+        default_index_id = None
+        for index_info in data_loader.get_available_indexes():
+            if index_info.get('default', False):
+                default_index_id = index_info['id']
+                break
+        
+        # If no default, use first available
+        if not default_index_id and data_loader.get_available_indexes():
+            default_index_id = data_loader.get_available_indexes()[0]['id']
+        
+        if search_engine.initialize(csv_path, index_id=default_index_id):
+            current_index = data_loader.get_current_index_info()
+            index_name = current_index['name'] if current_index else 'Unknown'
+            INITIALIZATION_STATUS = {"initialized": True, "message": f"Search engine initialized with index: {index_name}"}
+            logger.info(f"Search engine initialized on startup with index: {index_name}")
             logger.info("💡 Note: GME model will be loaded only when image search is used (lazy loading)")
         else:
             INITIALIZATION_STATUS = {"initialized": False, "message": "Failed to initialize search engine"}
@@ -252,11 +266,18 @@ async def home(request: Request):
     filter_options = search_engine.get_filter_options() if INITIALIZATION_STATUS["initialized"] else {}
     checkpoints = data_loader.get_available_checkpoints() if INITIALIZATION_STATUS["initialized"] else []
     
+    # Get available indexes
+    indexes = data_loader.get_available_indexes()
+    current_index = data_loader.get_current_index_info()
+    
     return templates.TemplateResponse("index.html", {
         "request": request,
         "initialization_status": INITIALIZATION_STATUS,
         "filter_options": filter_options,
-        "checkpoints": checkpoints
+        "checkpoints": checkpoints,
+        "indexes": indexes,
+        "current_index": current_index,
+        "current_index_id": data_loader.current_index_id
     })
 
 @app.get("/api/status")
@@ -587,15 +608,15 @@ async def filter_only_batch_search(
                     'Matched_SKU': match_row['SKU_COD'],
                 }
                 
-                # Add the matching column values for comparison
-                for col in matching_cols:
-                    result[f'Source_{col}'] = input_data.get(col, '')
-                    result[f'Matched_{col}'] = match_row.get(col, '')
+                # Add ALL columns from source item (prefixed with Source_)
+                for col, value in input_data.items():
+                    if col not in ['Input_SKU', 'Matched_SKU']:  # Avoid duplicates
+                        result[f'Source_{col}'] = value
                 
-                # Add additional columns
-                result['Matched_MODEL_COD'] = match_row.get('MODEL_COD', '')
-                result['Matched_STARTSKU_DATE'] = match_row.get('STARTSKU_DATE', '')
-                result['Matched_MD_SKU_STATUS_COD'] = match_row.get('MD_SKU_STATUS_COD', '')
+                # Add ALL columns from matched item (prefixed with Matched_)
+                for col, value in match_row.items():
+                    if col != 'SKU_COD':  # Already included as Matched_SKU
+                        result[f'Matched_{col}'] = value
                 
                 all_results.append(result)
         
@@ -679,8 +700,8 @@ async def enhanced_batch_search(
         # Initialize dual engine if requested
         if dual_engine:
             logger.info("🚀 Initializing dual engine for this search...")
-            # Use enriched database with shape information from final_for_similarity.csv
-            csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
+            # Use new database with reduced products
+            csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
             if not dual_engine.initialize_dual_engine(csv_path, "680", "1095"):
                 logger.warning("⚠️ Dual engine initialization failed, falling back to single engine")
                 dual_engine_enabled = False
@@ -1066,10 +1087,15 @@ async def enhanced_batch_search(
                                 'Similarity_Score': round(1 - similar_item.get('similarity_score', 0), 3)
                             }
                             
-                            # Add matching column values (using SKU-specific source)
-                            for col in matching_cols:
-                                result_row[f'Source_{col}'] = sku_source_item.get(col, '')
-                                result_row[f'Similar_{col}'] = similar_item.get(col, '')
+                            # Add ALL columns from source item (prefixed with Source_)
+                            for col, value in sku_source_item.items():
+                                if col not in ['Input_SKU', 'Similar_SKU', 'Similarity_Score']:  # Avoid duplicates
+                                    result_row[f'Source_{col}'] = value
+                            
+                            # Add ALL columns from similar item (prefixed with Similar_)
+                            for col, value in similar_item.items():
+                                if col not in ['similarity_score', 'SKU_COD']:  # These are already included
+                                    result_row[f'Similar_{col}'] = value
                             
                             # Add dual engine information if applicable
                             if dual_engine_enabled:
@@ -1174,13 +1200,49 @@ async def get_checkpoints():
     """Get available LoRA checkpoints"""
     return data_loader.get_available_checkpoints()
 
+@app.get("/api/indexes")
+async def get_indexes():
+    """Get available FAISS indexes"""
+    indexes = data_loader.get_available_indexes()
+    current_index = data_loader.get_current_index_info()
+    return {
+        "indexes": indexes,
+        "current_index_id": data_loader.current_index_id,
+        "current_index": current_index
+    }
+
+@app.post("/api/change-index")
+async def change_index(index_id: str = Form(...)):
+    """Change FAISS index"""
+    global INITIALIZATION_STATUS
+    try:
+        # Use new database with reduced products
+        csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
+        
+        if search_engine.initialize(csv_path, index_id=index_id):
+            current_index = data_loader.get_current_index_info()
+            index_name = current_index['name'] if current_index else index_id
+            INITIALIZATION_STATUS = {"initialized": True, "message": f"Switched to index: {index_name}"}
+            return {"success": True, "message": f"Switched to index: {index_name}", "current_index": current_index}
+        else:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Failed to switch to index {index_id}"}
+            )
+    except Exception as e:
+        logger.error(f"Error changing index: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
 @app.post("/api/change-checkpoint")
 async def change_checkpoint(checkpoint: str = Form(...)):
     """Change LoRA checkpoint"""
     global INITIALIZATION_STATUS
     try:
-        # Use enriched database with shape information from final_for_similarity.csv
-        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_enriched.csv")
+        # Use new database with reduced products
+        csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
         if search_engine.initialize(csv_path, checkpoint=checkpoint):
             INITIALIZATION_STATUS = {"initialized": True, "message": f"Switched to checkpoint {checkpoint}"}
             return {"success": True, "message": f"Switched to checkpoint {checkpoint}"}

@@ -65,7 +65,7 @@ def load_csv_data():
     """Load CSV data"""
     global df, INITIALIZATION_STATUS
     try:
-        csv_path = os.path.join(parent_dir, "database_results/final_with_aws_shapes_20250625_155822.csv")
+        csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
         if not os.path.exists(csv_path):
             INITIALIZATION_STATUS = {"initialized": False, "message": "CSV file not found"}
             return False

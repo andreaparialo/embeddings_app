@@ -1,0 +1,6 @@
+DATABASE ANALYSIS REPORT
+================================================================================
+
+File: database_results/DB_FINAL_SIMILARIT_270615.xlsx
+Shape: (12601, 25)
+Columns: ['SKU_COD', 'BRAND_DES', 'MD_SKU_STATUS_COD', 'PRODUCT_TYPE_COD', 'COLOR', 'COLOR_FAMILY_1_DES', 'ZLENSCODE', 'MODEL_COD', 'filename_root', 'USERGENDER_DES', 'CTM_FIRST_FRONT_MATERIAL_DES', 'CTM_FIRST_TEMPLE_MATERIAL_DES', 'SIZE_COD', 'FRONT_LENGTH_VAL', 'BRIDGE_LENGTH_VAL', 'FRONT_HEIGHT_VAL', 'STARTSKU_DATE', 'ACT_SKU_PRICE_VAL', 'MACRO_SHAPE_AWS', 'GRANULAR_SHAPE_AWS', 'SHAPE_SEMI_GROUPED', 'FlatTop_FlatTop_1', 'browline_browline_1', 'bridge_Bridge_1', 'RIM_TYPE_DES']
