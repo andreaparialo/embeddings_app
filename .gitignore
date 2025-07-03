@@ -13,6 +13,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+IAN/
+ultimepics/
 parts/
 sdist/
 var/
@@ -27,6 +29,7 @@ venv/
 env/
 ENV/
 env.bak/
+delta_images_to_index/
 venv.bak/
 
 # IDE
