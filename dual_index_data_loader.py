@@ -231,12 +231,41 @@ class DualIndexDataLoader:
         
         return True
     
-    def search_main_index(self, query_embedding: np.ndarray, top_k: int = 50) -> Tuple[np.ndarray, np.ndarray]:
-        """Search in main index"""
+    def search_main_index(self, query_embedding: np.ndarray, top_k: int = 50, filters: Dict = None) -> Tuple[np.ndarray, np.ndarray]:
+        """Search in main index with optional pre-filtering"""
         if self.main_index is None:
             raise ValueError("Main index not loaded")
         
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
+        
+        # If filters are provided, use the optimized search with pre-filtering
+        if filters and self.df is not None and hasattr(self.main_data_loader, 'idx_to_filename_root'):
+            try:
+                logger.info(f"🔍 Using pre-filtered search with filters: {filters}")
+                logger.info(f"📊 Filter validation: df={self.df is not None}, idx_mapping={hasattr(self.main_data_loader, 'idx_to_filename_root')}")
+                # Use the same pre-filtering logic as regular batch search
+                from optimized_faiss_search import OptimizedFAISSSearch
+                optimized_search = OptimizedFAISSSearch(self.df, self.main_index, self.main_data_loader.idx_to_filename_root)
+                
+                # Use search_with_prefilter which applies filters before FAISS search
+                distances, indices = optimized_search.search_with_prefilter(
+                    query_embedding, filters, top_k
+                )
+                return distances[0], indices[0]
+            except Exception as e:
+                logger.warning(f"⚠️ Pre-filtered search failed ({e}), falling back to raw search")
+                import traceback
+                traceback.print_exc()
+        else:
+            if not filters:
+                logger.info("🔍 Using raw FAISS search (no filters provided)")
+            elif self.df is None:
+                logger.warning("⚠️ Cannot use filtered search: df is None")
+            elif not hasattr(self.main_data_loader, 'idx_to_filename_root'):
+                logger.warning("⚠️ Cannot use filtered search: idx_to_filename_root not available")
+        
+        # Fallback to raw FAISS search without filtering
+        logger.info("🔍 Using raw FAISS search (fallback)")
         distances, indices = self.main_index.search(query_embedding, top_k)
         return distances[0], indices[0]
     

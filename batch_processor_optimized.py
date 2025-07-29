@@ -365,8 +365,11 @@ class OptimizedBatchProcessor:
                 # For batch search, we use the GME embedding from the query (filename_root's embedding)
                 # and search for the corresponding measurement embedding in the dual index system
                 
-                # 1. Search in GME index (main index)
-                main_distances, main_indices = dual_index_loader.search_main_index(gme_embedding, top_k)
+                # Debug: Log filters being applied
+                logger.info(f"🔍 Debug [{query_id}]: Applying filters {filters}")
+                
+                # 1. Search in GME index (main index) WITH FILTERS
+                main_distances, main_indices = dual_index_loader.search_main_index(gme_embedding, top_k, filters)
                 
                 # 2. Measurement index limitation: IndexIVFFlat doesn't support reconstruction
                 # For batch search, we'll use a practical workaround approach
