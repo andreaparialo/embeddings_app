@@ -12,6 +12,7 @@ from search_engine import search_engine
 from data_loader import data_loader
 from dual_engine import dual_engine
 from gme_model import gme_model
+from dual_index_search_engine import dual_search_engine
 import json
 import math
 import time
@@ -277,6 +278,19 @@ async def startup_event():
             INITIALIZATION_STATUS = {"initialized": True, "message": f"Search engine initialized with index: {index_name}"}
             logger.info(f"Search engine initialized on startup with index: {index_name}")
             logger.info("💡 Note: GME model will be loaded only when image search is used (lazy loading)")
+            
+            # Also try to initialize dual search engine
+            logger.info("🔄 Initializing Dual Index Search Engine...")
+            try:
+                # Use the same index_id as the main engine for consistency
+                dual_index_id = default_index_id or "v11_1095_db_pictures_512_merged_final"
+                if dual_search_engine.initialize(csv_path, "indexes", "1095", dual_index_id):
+                    logger.info("✅ Dual search engine initialized successfully")
+                else:
+                    logger.warning("⚠️ Dual search engine initialization failed - continuing with main engine only")
+            except Exception as e:
+                logger.warning(f"⚠️ Dual search engine initialization error: {e} - continuing with main engine only")
+                
         else:
             INITIALIZATION_STATUS = {"initialized": False, "message": "Failed to initialize search engine"}
     except Exception as e:
@@ -435,6 +449,91 @@ async def search_by_image(
         
     except Exception as e:
         logger.error(f"❌ Error in image search endpoint: {e}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        return {"error": str(e)}
+
+@app.post("/search/image-dual")
+async def search_by_image_dual_endpoint(
+    file: UploadFile = File(...),
+    filters: str = Form("{}"),
+    top_k: int = Form(50),
+    main_weight: float = Form(0.7),
+    measurement_weight: float = Form(0.3)
+):
+    """Search by image similarity using dual indexes (GME + Measurement)"""
+    try:
+        logger.info(f"🔍 Dual-index image search request received")
+        logger.info(f"📁 File: {file.filename}")
+        logger.info(f"🎯 Top K: {top_k}")
+        logger.info(f"⚖️ Weights: Main={main_weight}, Measurement={measurement_weight}")
+        
+        # Check if dual search engine is initialized
+        if not dual_search_engine.is_initialized:
+            logger.error("❌ Dual search engine not initialized")
+            return {"error": "Dual search engine not initialized"}
+        
+        # Parse filters
+        try:
+            filter_dict = json.loads(filters) if filters != "{}" else {}
+            logger.info(f"🔧 Parsed filters: {list(filter_dict.keys())}")
+        except json.JSONDecodeError as e:
+            logger.error(f"❌ Invalid filter JSON format: {e}")
+            return {"error": "Invalid filter format"}
+        
+        # Check file
+        if not file.filename:
+            logger.error("❌ No filename provided")
+            return {"error": "No file provided"}
+        
+        # Save uploaded file temporarily
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_filename = f"temp_dual_{timestamp}_{file.filename}"
+        temp_path = os.path.join(app_dir, "uploads", temp_filename)
+        
+        logger.info(f"💾 Saving to: {temp_path}")
+        try:
+            with open(temp_path, "wb") as buffer:
+                content = await file.read()
+                buffer.write(content)
+            logger.info(f"✅ File saved successfully, size: {len(content)} bytes")
+        except Exception as e:
+            logger.error(f"❌ Error saving file: {e}")
+            return {"error": f"Error saving file: {e}"}
+        
+        # Perform dual-index search
+        logger.info("🚀 Starting dual-index image similarity search...")
+        try:
+            results = dual_search_engine.search_by_image_similarity_dual(
+                temp_path, filter_dict, top_k, main_weight, measurement_weight
+            )
+            logger.info(f"✅ Dual search completed, got {len(results)} results")
+        except Exception as e:
+            logger.error(f"❌ Error in dual search: {e}")
+            return {"error": f"Dual search failed: {e}"}
+        
+        # Cleanup
+        try:
+            os.remove(temp_path)
+            logger.info("🧹 Temporary file cleaned up")
+        except Exception as e:
+            logger.warning(f"⚠️ Could not clean up temp file: {e}")
+        
+        logger.info(f"✅ Dual-index search completed - returned {len(results)} results")
+        
+        # Sanitize results for JSON serialization
+        sanitized_results = sanitize_json_data(results)
+        
+        return {
+            "results": sanitized_results,
+            "total": len(results),
+            "search_type": "dual_index_similarity",
+            "weights": {"main": main_weight, "measurement": measurement_weight},
+            "filters_applied": list(filter_dict.keys())
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in dual-index search endpoint: {e}")
         import traceback
         logger.error(f"❌ Traceback: {traceback.format_exc()}")
         return {"error": str(e)}
@@ -763,17 +862,29 @@ async def enhanced_batch_search(
             return {"error": "Invalid allowed status codes format"}
         
         # Initialize dual engine if requested
-        if dual_engine:
-            logger.info("🚀 Initializing dual engine for this search...")
-            # Use new database with reduced products
-            csv_path = os.path.join(parent_dir, "database_results/DB_ACTIVE.csv")
-            if not dual_engine.initialize_dual_engine(csv_path, "680", "1095"):
-                logger.warning("⚠️ Dual engine initialization failed, falling back to single engine")
-                dual_engine_enabled = False
-            else:
+        # Handle dual index request (NEW dual index system - GME + measurement features)
+        dual_engine_requested = dual_engine
+        dual_engine_enabled = False
+        
+        if dual_engine_requested:
+            logger.info("🎭 Dual index search requested by user")
+            logger.info("🔍 Checking if dual index system is available...")
+            
+            # Check if dual index system is initialized
+            if dual_search_engine.is_initialized:
+                logger.info("✅ Dual index system is ready!")
+                logger.info("📊 Batch search will use BOTH indexes with pre-computed embeddings:")
+                logger.info("   • GME embeddings: 27,531 products (3584d)")
+                logger.info("   • Measurement embeddings: 41,466 products (256d)")
+                logger.info("   • No real-time calculation needed - using pre-computed features")
+                
                 dual_engine_enabled = True
-                logger.info("✅ Dual engine ready")
+                logger.info("🚀 Dual index enabled for batch search")
+            else:
+                logger.warning("⚠️ Dual index system not initialized, falling back to GME-only")
+                dual_engine_enabled = False
         else:
+            logger.info("🎯 Using standard GME search for batch processing")
             dual_engine_enabled = False
         
         # Save uploaded file temporarily  
@@ -1314,6 +1425,43 @@ async def get_indexes():
         "current_index_id": data_loader.current_index_id,
         "current_index": current_index
     }
+
+@app.get("/api/dual-index-stats")
+async def get_dual_index_stats():
+    """Get statistics about the dual index system"""
+    try:
+        if dual_search_engine.is_initialized:
+            stats = dual_search_engine.get_search_stats()
+            return {
+                "status": "initialized",
+                "stats": stats
+            }
+        else:
+            return {
+                "status": "not_initialized",
+                "message": "Dual index system not initialized"
+            }
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+
+@app.post("/api/set-dual-weights")
+async def set_dual_weights(main_weight: float = Form(...), measurement_weight: float = Form(...)):
+    """Set default weights for dual-index searches"""
+    try:
+        if not dual_search_engine.is_initialized:
+            return {"error": "Dual search engine not initialized"}
+        
+        dual_search_engine.set_default_weights(main_weight, measurement_weight)
+        return {
+            "success": True,
+            "message": f"Weights updated: Main={main_weight:.2f}, Measurement={measurement_weight:.2f}",
+            "weights": {"main": main_weight, "measurement": measurement_weight}
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 @app.post("/api/change-index")
 async def change_index(index_id: str = Form(...)):

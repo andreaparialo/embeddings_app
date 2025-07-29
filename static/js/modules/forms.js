@@ -72,14 +72,31 @@ export class FormManager {
     async handleImageSearch(e) {
         e.preventDefault();
         
-        this.app.showLoading('Searching for similar products...');
+        // Check if dual engine is enabled
+        const dualEngineEnabled = document.getElementById('dual-engine-image')?.checked || false;
+        const searchType = dualEngineEnabled ? 'dual-index' : 'standard';
+        
+        this.app.showLoading(`Searching for similar products using ${searchType} search...`);
         
         const formData = new FormData(e.target);
         const filters = this.app.filters.collectFilters(document.getElementById('image-filters'));
         formData.append('filters', JSON.stringify(filters));
         
+        // Add dual engine parameters if enabled
+        let endpoint = '/search/image';
+        if (dualEngineEnabled) {
+            endpoint = '/search/image-dual';
+            const mainWeight = parseFloat(document.getElementById('main-weight')?.value || 0.7);
+            const measurementWeight = parseFloat(document.getElementById('measurement-weight')?.value || 0.3);
+            
+            formData.append('main_weight', mainWeight);
+            formData.append('measurement_weight', measurementWeight);
+            
+            console.log(`🔍 Using dual-index search with weights: Visual=${mainWeight}, Technical=${measurementWeight}`);
+        }
+        
         try {
-            const result = await this.api.post('/search/image', formData);
+            const result = await this.api.post(endpoint, formData);
             
             if (result.error) {
                 this.app.showError(result.error);
