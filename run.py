@@ -67,16 +67,17 @@ def main():
         sys.exit(1)
     
     # Check if FAISS index exists
-    index_files = [
-        "indexes/v11_complete_merged_20250625_115302.faiss",
-        "indexes/v11_o00_index_1095.faiss",
-        "indexes/v11_o00_index_680.faiss",
-        "indexes/v11_o00_index.faiss"
-    ]
+    indexes_dir = os.path.join(script_dir, "indexes")
+    faiss_files = [f for f in os.listdir(indexes_dir) if f.endswith('.faiss')]
     
-    if not any(os.path.exists(os.path.join(script_dir, f)) for f in index_files):
+    if not faiss_files:
         print("❌ No FAISS index files found in indexes/ directory")
+        print("indexes/ exist")
         sys.exit(1)
+    else:
+        print(f"✅ Found {len(faiss_files)} FAISS index file(s):")
+        for f in faiss_files:
+            print(f"   - {f}")
     
     print("✅ All required files and directories found")
     print("🚀 Starting Hybrid Product Search Engine...")

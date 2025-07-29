@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vision Search - AI-Powered Product Discovery</title>
+    
+    <!-- Modern Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Application CSS -->
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <div class="logo">
+                <h1><i class="fas fa-eye"></i> Vision Search</h1>
+            </div>
+            <ul class="nav-menu">
+                <li class="nav-item active" data-view="image-search">
+                    <a href="#">
+                        <i class="fas fa-camera"></i>
+                        <span>Image Search</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="sku-search">
+                    <a href="#">
+                        <i class="fas fa-barcode"></i>
+                        <span>SKU Search</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="batch-search">
+                    <a href="#">
+                        <i class="fas fa-file-excel"></i>
+                        <span>Batch Search</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="filter-search">
+                    <a href="#">
+                        <i class="fas fa-filter"></i>
+                        <span>Filter Search</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="batch-viewer">
+                    <a href="#">
+                        <i class="fas fa-th-large"></i>
+                        <span>Batch Viewer</span>
+                    </a>
+                </li>
+                <li class="nav-item" data-view="settings">
+                    <a href="#">
+                        <i class="fas fa-cog"></i>
+                        <span>Settings</span>
+                    </a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="header">
+                <h1 class="page-title" id="page-title">Image Search</h1>
+                <div class="header-actions">
+                    <div class="status-badge {% if not initialization_status.initialized %}error{% endif %}" id="status-badge">
+                        <div class="status-indicator"></div>
+                        <span id="status-text">
+                            {% if initialization_status.initialized %}
+                                System Ready
+                            {% else %}
+                                {{ initialization_status.message }}
+                            {% endif %}
+                        </span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Loading State -->
+            <div class="loading-container" id="loading">
+                <div class="spinner"></div>
+                <p>Processing your request...</p>
+            </div>
+
+            <!-- Image Search View -->
+            <div class="view-container active" id="image-search-view">
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-camera"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Search by Image</h2>
+                            <p class="text-muted">Upload an image to find similar products</p>
+                        </div>
+                    </div>
+                    
+                    <form id="image-search-form" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label class="form-label">Upload Image</label>
+                            <div class="file-upload-area" id="image-drop-zone">
+                                <input type="file" class="file-input" id="image-file" name="file" accept="image/*" required>
+                                <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                                <p>Drop image here or click to browse</p>
+                                <p class="small text-muted">Supports JPG, PNG, GIF up to 10MB</p>
+                            </div>
+                        </div>
+                        
+                        <div class="filter-section">
+                            <h6>Optional Filters</h6>
+                            <div id="image-filters"></div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
+                            <i class="fas fa-search"></i>
+                            Search Similar Products
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Results Container -->
+                <div class="results-container" id="image-results-container" style="display: none;">
+                    <div class="results-header">
+                        <h3>Search Results</h3>
+                        <span class="badge" id="image-results-count"></span>
+                    </div>
+                    <div class="results-grid" id="image-results-grid"></div>
+                </div>
+            </div>
+
+            <!-- SKU Search View -->
+            <div class="view-container" id="sku-search-view">
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-barcode"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Search by SKU</h2>
+                            <p class="text-muted">Find products by their SKU code</p>
+                        </div>
+                    </div>
+                    
+                    <form id="sku-search-form">
+                        <div class="form-group">
+                            <label for="sku-input" class="form-label">SKU Code</label>
+                            <input type="text" class="form-control" id="sku-input" name="sku_cod" placeholder="Enter SKU code" required>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
+                            <i class="fas fa-search"></i>
+                            Search SKU
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Results Container -->
+                <div class="results-container" id="sku-results-container" style="display: none;">
+                    <div class="results-header">
+                        <h3>Search Results</h3>
+                        <span class="badge" id="sku-results-count"></span>
+                    </div>
+                    <div class="results-grid" id="sku-results-grid"></div>
+                </div>
+            </div>
+
+            <!-- Batch Search View -->
+            <div class="view-container" id="batch-search-view">
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-file-excel"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Enhanced Batch Search</h2>
+                            <p class="text-muted">Process multiple SKUs from Excel file</p>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-success">
+                        <i class="fas fa-rocket"></i>
+                        <div>
+                            <strong>Performance Optimization Active!</strong><br>
+                            SKUs are automatically grouped by image. Multiple SKUs sharing the same product image are processed together!<br>
+                            <small>NEW: Batches with >10 unique images use parallel processing (16 images at once)!</small>
+                        </div>
+                    </div>
+                    
+                    <form id="excel-search-form" enctype="multipart/form-data">
+                        <div class="form-group">
+                            <label class="form-label">Upload Excel File</label>
+                            <div class="file-upload-area" id="excel-drop-zone">
+                                <input type="file" class="file-input" id="excel-file" name="file" accept=".xlsx,.xls" required>
+                                <i class="fas fa-file-excel upload-icon"></i>
+                                <p>Drop Excel file here or click to browse</p>
+                                <p class="small text-muted">SKU codes should be in the first column</p>
+                            </div>
+                        </div>
+                        
+                        <div class="filter-section">
+                            <h6>Select Columns to Match</h6>
+                            <p class="text-muted small">For each SKU, similar products will be filtered to match the selected attributes.</p>
+                            <div id="excel-matching-columns" class="row"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">Allowed MD SKU Status Codes</label>
+                            <div class="row">
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-il" name="allowed_status_codes" value="IL" checked>
+                                        <label class="form-check-label" for="status-il">IL</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-ns" name="allowed_status_codes" value="NS" checked>
+                                        <label class="form-check-label" for="status-ns">NS</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-nf" name="allowed_status_codes" value="NF" checked>
+                                        <label class="form-check-label" for="status-nf">NF</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-ob" name="allowed_status_codes" value="OB" checked>
+                                        <label class="form-check-label" for="status-ob">OB</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-aa" name="allowed_status_codes" value="AA" checked>
+                                        <label class="form-check-label" for="status-aa">AA</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="status-empty" name="allowed_status_codes" value="">
+                                        <label class="form-check-label" for="status-empty">Empty</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="group-unisex" name="group_unisex">
+                                    <label class="form-check-label" for="group-unisex">
+                                        <strong>Group Unisex</strong> (Only applies when USERGENDER_DES is selected)
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="dual-engine" name="dual_engine">
+                                    <label class="form-check-label" for="dual-engine">
+                                        <strong>🚀 Dual Engine Mode</strong> (Experimental)
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="filter-only-mode" name="filter_only_mode">
+                                    <label class="form-check-label" for="filter-only-mode">
+                                        <strong>🔍 Filter-Only Mode</strong> (No Image Search - Returns ALL matching products)
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="viewer-mode" name="viewer_mode">
+                                    <label class="form-check-label" for="viewer-mode">
+                                        <strong>👁️ Viewer Mode</strong> (View results interactively instead of download)
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="max-results-per-sku" class="form-label">Max Results per SKU</label>
+                                    <select class="form-select" id="max-results-per-sku" name="max_results_per_sku">
+                                        <option value="5">5</option>
+                                        <option value="10" selected>10</option>
+                                        <option value="20">20</option>
+                                        <option value="50">50</option>
+                                        <option value="100">100</option>
+                                        <option value="200">200</option>
+                                        <option value="500">500</option>
+                                        <option value="1000">1000</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6 d-flex align-items-center">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="exclude-same-model" name="exclude_same_model" checked>
+                                    <label class="form-check-label" for="exclude-same-model">
+                                        Exclude same MODEL_COD
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
+                            <i class="fas fa-upload"></i>
+                            <span id="submit-button-text">Process & Export Results</span>
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <!-- Filter Search View -->
+            <div class="view-container" id="filter-search-view">
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-filter"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Search by Filters</h2>
+                            <p class="text-muted">Find products using attribute filters</p>
+                        </div>
+                    </div>
+                    
+                    <form id="filter-search-form">
+                        <div class="filter-section">
+                            <div id="filter-controls"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label class="form-label">MD SKU Status Codes</label>
+                            <div class="row">
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-il" name="status_filter" value="IL" checked>
+                                        <label class="form-check-label" for="filter-status-il">IL</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-ns" name="status_filter" value="NS" checked>
+                                        <label class="form-check-label" for="filter-status-ns">NS</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-nf" name="status_filter" value="NF" checked>
+                                        <label class="form-check-label" for="filter-status-nf">NF</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-ob" name="status_filter" value="OB" checked>
+                                        <label class="form-check-label" for="filter-status-ob">OB</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-aa" name="status_filter" value="AA" checked>
+                                        <label class="form-check-label" for="filter-status-aa">AA</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="filter-status-empty" name="status_filter" value="">
+                                        <label class="form-check-label" for="filter-status-empty">Empty</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
+                            <i class="fas fa-search"></i>
+                            Search by Filters
+                        </button>
+                    </form>
+                </div>
+                
+                <!-- Results Container -->
+                <div class="results-container" id="filter-results-container" style="display: none;">
+                    <div class="results-header">
+                        <h3>Search Results</h3>
+                        <span class="badge" id="filter-results-count"></span>
+                    </div>
+                    <div class="results-grid" id="filter-results-grid"></div>
+                </div>
+            </div>
+
+            <!-- Batch Viewer View -->
+            <div class="view-container" id="batch-viewer-view">
+                <div class="batch-viewer" id="batch-viewer-content">
+                    <div class="batch-viewer-upload-section" id="batch-viewer-upload">
+                        <div class="search-section">
+                            <div class="section-header">
+                                <div class="section-icon">
+                                    <i class="fas fa-file-excel"></i>
+                                </div>
+                                <div>
+                                    <h2 class="section-title">Batch Results Viewer</h2>
+                                    <p class="text-muted">Upload an Excel file with batch search results to view them interactively</p>
+                                </div>
+                            </div>
+                            
+                            <form id="excel-upload-form" enctype="multipart/form-data" action="javascript:void(0)">
+                                <div class="form-group">
+                                    <label for="excel-results-file" class="form-label">Upload Excel Results File</label>
+                                    <input type="file" class="form-control" id="excel-results-file" name="file" accept=".xlsx,.xls" required>
+                                    <small class="text-muted">Upload a previously downloaded batch search results Excel file</small>
+                                </div>
+                                
+                                <button type="button" class="btn btn-primary" id="upload-excel-btn">
+                                    <i class="fas fa-upload"></i>
+                                    Load Results for Viewing
+                                </button>
+                            </form>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <p class="text-muted">
+                                <strong>How to use:</strong><br>
+                                1. Upload an Excel file from a previous batch search<br>
+                                2. Browse through results interactively<br>
+                                3. View detailed product information and images<br>
+                                <br>
+                                <em>Alternatively, use "Viewer Mode" when running a new batch search to view results directly.</em>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="batch-viewer-results" id="batch-viewer-results" style="display: none;">
+                        <!-- Results will be populated here by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div class="view-container" id="settings-view">
+                {% if checkpoints %}
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-brain"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">Model Configuration</h2>
+                            <p class="text-muted">Switch between different LoRA checkpoints</p>
+                        </div>
+                    </div>
+                    
+                    <form id="checkpoint-form">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="checkpoint-select" class="form-label">LoRA Checkpoint</label>
+                                    <select class="form-select" id="checkpoint-select" name="checkpoint">
+                                        {% for checkpoint in checkpoints %}
+                                        <option value="{{ checkpoint }}" {% if checkpoint == "680" %}selected{% endif %}>
+                                            checkpoint-{{ checkpoint }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="col-md-6 d-flex align-items-center">
+                                <button type="submit" class="btn btn-secondary">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Switch Checkpoint
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                {% endif %}
+
+                {% if indexes %}
+                <div class="search-section">
+                    <div class="section-header">
+                        <div class="section-icon">
+                            <i class="fas fa-database"></i>
+                        </div>
+                        <div>
+                            <h2 class="section-title">FAISS Index Configuration</h2>
+                            <p class="text-muted">Select the search index to use</p>
+                        </div>
+                    </div>
+                    
+                    <form id="index-form">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="index-select" class="form-label">Select Index</label>
+                                    <select class="form-select" id="index-select" name="index_id">
+                                        {% for index in indexes %}
+                                        <option value="{{ index.id }}" {% if index.id == current_index_id %}selected{% endif %}>
+                                            {{ index.name }}
+                                        </option>
+                                        {% endfor %}
+                                    </select>
+                                    {% if current_index %}
+                                    <small class="text-muted">{{ current_index.description }}</small>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <div class="col-md-6 d-flex align-items-center">
+                                <button type="submit" class="btn btn-secondary">
+                                    <i class="fas fa-sync-alt"></i>
+                                    Switch Index
+                                </button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                {% endif %}
+            </div>
+        </main>
+    </div>
+
+    <!-- Pass data from backend to frontend -->
+    <script>
+        window.filterOptions = {{ filter_options | tojson }};
+        window.initializationStatus = {{ initialization_status | tojson }};
+    </script>
+    
+    <!-- Application JavaScript -->
+    <script type="module" src="/static/js/app.js?v=4"></script>
+</body>
+</html> 
