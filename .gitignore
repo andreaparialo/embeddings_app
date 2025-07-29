@@ -1708,3 +1708,8 @@ Miniconda3-latest-Linux-x86_64.sh*
 db_pictures_512/
 IAN/
 ultimepics/
+
+# Ignore local directories that shouldn't be tracked
+IAN/
+gme-Qwen2-VL-7B-Instruct/
+ultimepics/
