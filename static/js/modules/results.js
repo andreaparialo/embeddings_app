@@ -19,6 +19,13 @@ export class ResultsManager {
             return;
         }
         
+        // Check if the parent view is active before showing results
+        const parentView = container.closest('.view');
+        if (parentView && !parentView.classList.contains('active')) {
+            console.warn('Attempting to show results in an inactive view');
+            return;
+        }
+        
         // Make sure the container is visible
         container.style.display = 'block';
         

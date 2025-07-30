@@ -386,25 +386,49 @@ h6 { font-size: 1rem; }
 /* ================================================
    7. Cards & Panels
    ================================================ */
+/* View system - proper isolation */
+.view {
+    display: none;
+    position: relative;
+    width: 100%;
+    min-height: 100%;
+    overflow: hidden; /* Prevent content from spilling out */
+    z-index: 1; /* Create stacking context */
+}
+
+.view.active {
+    display: block;
+}
+
+/* Ensure inactive views and their children are completely hidden */
+.view:not(.active) {
+    display: none !important;
+    visibility: hidden !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+
+.view:not(.active) * {
+    display: none !important;
+}
+
 .view-container {
     padding: 2rem;
     max-width: 1400px;
     margin: 0 auto;
     animation: fadeIn 0.3s ease;
-    display: none;
     position: relative; /* Ensure containing context for results */
-    overflow: hidden; /* Prevent results from spilling out */
-}
-
-.view-container.active {
-    display: block;
+    min-height: calc(100vh - 200px); /* Ensure minimum height */
 }
 
 /* Ensure results containers are properly contained within their view */
+.view .results-container,
 .view-container .results-container {
     position: relative;
     z-index: 1; /* Keep results within their view context */
     margin-top: 2rem;
+    width: 100%; /* Ensure full width containment */
+    overflow: visible; /* Allow content to be visible but contained */
 }
 
 .search-section {
@@ -489,6 +513,10 @@ h6 { font-size: 1rem; }
    ================================================ */
 .results-container {
     margin-top: 2rem;
+    position: relative;
+    width: 100%;
+    z-index: 10; /* Ensure results stay within their view */
+    background: transparent; /* Ensure clean background */
 }
 
 .results-header {
