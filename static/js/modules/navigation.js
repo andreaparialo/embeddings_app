@@ -56,19 +56,16 @@ export class NavigationManager {
         // First, clear all results to prevent overlap
         this.clearAllResults();
         
-        // Hide all views - use querySelectorAll to get all view elements
-        const allViews = document.querySelectorAll('.view');
-        allViews.forEach(view => {
+        // Hide all view containers
+        this.views.forEach(view => {
             view.classList.remove('active');
-            // Also ensure display is set to none for extra safety
-            view.style.display = 'none';
+            // Reset any inline styles
+            view.style.display = '';
         });
         
         // Show selected view
         const targetView = document.getElementById(viewId + '-view');
         if (targetView) {
-            // First set display to block, then add active class
-            targetView.style.display = 'block';
             targetView.classList.add('active');
         }
         
@@ -95,18 +92,13 @@ export class NavigationManager {
             'image-results-container',
             'sku-results-container',
             'batch-results-container',
-            'filter-results-container',
-            'image-results', // Also handle containers without -container suffix
-            'results-container' // Generic results container if exists
+            'filter-results-container'
         ];
         
         allResultsContainers.forEach(containerId => {
             const container = document.getElementById(containerId);
             if (container) {
                 container.style.display = 'none';
-                // Reset any inline styles that might interfere
-                container.style.position = '';
-                container.style.zIndex = '';
                 
                 // Also clear the grid content
                 const grid = document.getElementById(containerId.replace('-container', '-grid'));
@@ -120,12 +112,6 @@ export class NavigationManager {
                     countBadge.textContent = '';
                 }
             }
-        });
-        
-        // Also clear any generic results grids
-        const allGrids = document.querySelectorAll('.results-grid');
-        allGrids.forEach(grid => {
-            grid.innerHTML = '';
         });
     }
 
