@@ -1,12 +1,12 @@
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 import pandas as pd
 import os
 import tempfile
 import shutil
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 import logging
 from search_engine import search_engine
 from data_loader import data_loader
@@ -19,6 +19,10 @@ import time
 from datetime import datetime
 import uuid
 from io import BytesIO
+import config_filtering
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+import traceback
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -539,26 +543,217 @@ async def search_by_image_dual_endpoint(
         return {"error": str(e)}
 
 @app.post("/search/sku")
-async def search_by_sku_endpoint(sku: str = Form(...), top_k: int = Form(50)):
-    """Search by SKU code"""
+async def search_by_sku(
+    sku: str = Form(...),
+    matching_columns: str = Form("[]"),
+    top_k: int = Form(50),
+    exclude_same_model: bool = Form(False),
+    allowed_status_codes: str = Form('["IL"]'),
+    group_unisex: bool = Form(False),
+    dual_engine: bool = Form(False),
+    main_weight: float = Form(0.7),
+    measurement_weight: float = Form(0.3)
+):
+    """
+    SKU search using image similarity with dual engine support
+    (This replaces the old pattern-matching search with proper image similarity)
+    """
     try:
-        logger.info(f"🔍 SKU search request received")
-        logger.info(f"🏷️  SKU query: '{sku}'")
+        import json
+        matching_cols = json.loads(matching_columns) if matching_columns else []
+        allowed_statuses = json.loads(allowed_status_codes) if allowed_status_codes else ['IL']
         
-        # Perform search
-        results = search_engine.search_by_sku(sku, top_k=top_k)
+        logger.info("🔍 SKU search request received (using image similarity)")
+        logger.info(f"🏷️  SKU: {sku}")
+        logger.info(f"⚙️  Matching columns: {matching_cols}")
+        logger.info(f"🚫 Exclude same model: {exclude_same_model}")
+        logger.info(f"👥 Group unisex: {group_unisex}")
+        logger.info(f"🚀 Dual engine: {dual_engine}")
+        if dual_engine:
+            logger.info(f"⚖️  Weights: Visual={main_weight:.2f}, Technical={measurement_weight:.2f}")
+        logger.info(f"📋 Allowed status codes: {allowed_statuses}")
         
-        logger.info(f"✅ SKU search completed - returned {len(results)} results")
-        return {
-            "results": sanitize_json_data(results),
-            "total": len(results),
-            "search_type": "sku",
-            "query": sku
+        # Find the SKU in the database
+        sku_upper = str(sku).strip().upper()
+        sku_data = data_loader.df[data_loader.df['SKU_COD'].astype(str).str.strip().str.upper() == sku_upper]
+        
+        if sku_data.empty:
+            logger.warning(f"❌ SKU not found: {sku}")
+            return {
+                "error": f"SKU {sku} not found in database",
+                "results": [],
+                "total": 0
+            }
+        
+        # Get the SKU data
+        source_item = sku_data.iloc[0].to_dict()
+        filename_root = source_item.get('filename_root')
+        
+        if not filename_root:
+            logger.error(f"❌ No filename_root for SKU {sku}")
+            return {
+                "error": f"No image associated with SKU {sku}",
+                "results": [],
+                "total": 0
+            }
+        
+        # Get image path
+        image_path = get_image_path(filename_root)
+        if not image_path:
+            logger.error(f"❌ Image not found for filename_root: {filename_root}")
+            return {
+                "error": f"Image not found for SKU {sku}",
+                "results": [],
+                "total": 0
+            }
+        
+        logger.info(f"📸 Found image: {image_path}")
+        
+        # Extract matching filters from source item
+        matching_filters = {}
+        for col in matching_cols:
+            if col in source_item:
+                matching_filters[col] = source_item[col]
+                logger.info(f"   🏷️ {col}: {source_item[col]}")
+        
+        # Define pre-filter and post-filter columns (same as batch)
+        prefilter_columns = config_filtering.get_prefilter_columns()
+        prefilter_columns = [col for col in prefilter_columns if col in matching_cols]
+        postfilter_columns = [col for col in matching_cols if col not in prefilter_columns]
+        
+        logger.info(f"🔍 Pre-filter columns: {prefilter_columns}")
+        logger.info(f"📋 Post-filter columns: {postfilter_columns}")
+        
+        # Build pre-filters for search
+        prefilters = {}
+        for col in prefilter_columns:
+            if col in matching_filters and matching_filters[col] is not None:
+                prefilters[col] = matching_filters[col]
+        
+        # Handle gender filtering for unisex grouping
+        if group_unisex and 'USERGENDER_DES' in prefilters:
+            source_gender = prefilters['USERGENDER_DES']
+            if source_gender in ['MAN', 'WOMAN']:
+                prefilters['USERGENDER_DES'] = [source_gender, 'UNISEX ADULT']
+        
+        # Check if dual engine is available and requested
+        dual_engine_enabled = False
+        if dual_engine and dual_search_engine.is_initialized:
+            dual_engine_enabled = True
+
+        
+        # Perform search using pre-computed embeddings (much more efficient!)
+        if dual_engine_enabled:
+            # Use efficient dual-index search with pre-computed embeddings (no model loading!)
+            logger.info("🚀 Using efficient dual-index search (no GME model loading or image re-encoding)")
+            similar_results = dual_search_engine.search_by_filename_similarity_dual(
+                filename_root,
+                filters=prefilters,  # Apply pre-filters during search
+                top_k=top_k * 3,  # Get extra for post-filtering
+                main_weight=main_weight,
+                measurement_weight=measurement_weight
+            )
+        else:
+            # Use efficient single-index search with pre-computed embeddings
+            logger.info("🚀 Using efficient filename-based search (no GME model loading or image re-encoding)")
+            similar_results = search_engine.search_by_filename_similarity(
+                filename_root,
+                filters=prefilters,  # Apply pre-filters during search
+                top_k=top_k * 3  # Get extra for post-filtering
+            )
+        
+        logger.info(f"🔍 Initial search returned {len(similar_results)} results")
+        
+        # Apply post-filters
+        filtered_results = []
+        items_before_postfilter = len(similar_results)
+        
+        for item in similar_results:
+            # Exclude same model if requested
+            if exclude_same_model and source_item.get('MODEL_COD') == item.get('MODEL_COD'):
+                continue
+            
+            # Apply post-filters
+            include_item = True
+            for col in postfilter_columns:
+                if col in matching_filters and col in item:
+                    source_value = matching_filters[col]
+                    item_value = item[col]
+                    
+                    # Handle different filter types
+                    if col in ['PRICE_WT_VAT', 'WIDTH', 'HEIGHT', 'BRIDGE', 'TEMPLE']:
+                        # Numeric range filters (within 10% tolerance)
+                        if source_value is not None and item_value is not None:
+                            try:
+                                tolerance = 0.1  # 10% tolerance
+                                diff = abs(float(item_value) - float(source_value)) / float(source_value)
+                                if diff > tolerance:
+                                    include_item = False
+                                    break
+                            except (ValueError, ZeroDivisionError):
+                                if item_value != source_value:
+                                    include_item = False
+                                    break
+                    else:
+                        # Exact match for other columns
+                        if item_value != source_value:
+                            include_item = False
+                            break
+            
+            # Handle unisex grouping in post-filters
+            if group_unisex and 'USERGENDER_DES' not in prefilter_columns:
+                source_gender = matching_filters.get('USERGENDER_DES')
+                item_gender = item.get('USERGENDER_DES')
+                if source_gender in ['MAN', 'WOMAN'] and item_gender not in [source_gender, 'UNISEX ADULT']:
+                    include_item = False
+            
+            if include_item:
+                filtered_results.append(item)
+        
+        # Sort by similarity score (higher similarity = lower distance = better match)
+        filtered_results = sorted(filtered_results, key=lambda x: x.get('similarity_score', 1))
+        
+        # Limit to requested number of results
+        filtered_results = filtered_results[:top_k]
+        
+        items_after_postfilter = len(filtered_results)
+        logger.info(f"📊 Post-filtering: {items_before_postfilter} → {items_after_postfilter} results")
+        logger.info(f"🏆 Results sorted by similarity score (best matches first)")
+        
+        # Prepare response with source SKU info
+        result_data = {
+            "source_sku": {
+                "sku_cod": sku,
+                "model_cod": source_item.get('MODEL_COD'),
+                "brand": source_item.get('BRAND_DES'),
+                "filename_root": filename_root,
+                "shape": source_item.get('SHAPE_SEMI_GROUPED'),
+                "filters_applied": matching_filters
+            },
+            "results": sanitize_json_data(filtered_results),
+            "total": len(filtered_results),
+            "search_type": "sku_image_similarity",
+            "dual_engine": dual_engine_enabled,
+            "prefilters_applied": prefilters,
+            "postfilters_applied": postfilter_columns
         }
         
+        # Add weight information if dual engine was used
+        if dual_engine_enabled:
+            result_data.update({
+                "main_weight": main_weight,
+                "measurement_weight": measurement_weight,
+                "scoring_formula": f"visual_similarity * {main_weight:.2f} + technical_similarity * {measurement_weight:.2f}"
+            })
+        
+        logger.info(f"✅ SKU search completed - {len(filtered_results)} results using IMAGE SIMILARITY")
+        return result_data
+        
     except Exception as e:
-        logger.error(f"❌ Error in SKU search endpoint: {e}")
-        return {"error": str(e)}
+        logger.error(f"❌ Error in SKU search: {e}")
+        import traceback
+        traceback.print_exc()
+        return {"error": str(e), "results": [], "total": 0}
 
 @app.post("/search/filters")
 async def search_by_filters_endpoint(filters: str = Form(...), top_k: int = Form(50)):
@@ -1178,15 +1373,15 @@ async def enhanced_batch_search(
                             source_gender = matching_filters['USERGENDER_DES']
                             if source_gender in ['MAN', 'WOMAN']:
                                 temp_filters = {k: v for k, v in matching_filters.items() if k != 'USERGENDER_DES'}
-                                similar_results = dual_engine.search_by_image_similarity_dual(
+                                similar_results = dual_search_engine.search_by_image_similarity_dual(
                                     image_path, temp_filters, top_k=search_multiplier
                                 )
                             else:
-                                similar_results = dual_engine.search_by_image_similarity_dual(
+                                similar_results = dual_search_engine.search_by_image_similarity_dual(
                                     image_path, matching_filters, top_k=search_multiplier
                                 )
                         else:
-                            similar_results = dual_engine.search_by_image_similarity_dual(
+                            similar_results = dual_search_engine.search_by_image_similarity_dual(
                                 image_path, matching_filters, top_k=search_multiplier
                             )
                     else:
@@ -1613,6 +1808,15 @@ async def upload_excel_results(file: UploadFile = File(...)):
             status_code=500,
             content={"error": f"Failed to process Excel file: {str(e)}"}
         )
+
+@app.get("/debug_navigation.html", response_class=HTMLResponse)
+async def debug_navigation():
+    """Debug route to test navigation module loading"""
+    try:
+        with open("debug_navigation.html", "r") as f:
+            return HTMLResponse(content=f.read())
+    except FileNotFoundError:
+        return HTMLResponse(content="<h1>Debug file not found</h1>", status_code=404)
 
 if __name__ == "__main__":
     import uvicorn

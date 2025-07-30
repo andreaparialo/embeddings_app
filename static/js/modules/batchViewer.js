@@ -2,7 +2,7 @@
 // Batch Viewer Manager Module - Redesigned
 // ================================================
 
-import { ProductCardComponent } from './productCard.js';
+import { ProductCardComponent } from './productCard.js?v=5';
 
 console.log('BatchViewer module loaded');
 

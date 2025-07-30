@@ -58,6 +58,9 @@ export class NavigationManager {
             view.classList.remove('active');
         });
         
+        // Clear all results containers to prevent overlap
+        this.clearAllResults();
+        
         // Show selected view
         const targetView = document.getElementById(viewId + '-view');
         if (targetView) {
@@ -79,6 +82,33 @@ export class NavigationManager {
         window.dispatchEvent(new CustomEvent('viewChanged', { 
             detail: { viewId } 
         }));
+    }
+
+    clearAllResults() {
+        // Hide all results containers to prevent them from appearing on other views
+        const allResultsContainers = [
+            'image-results-container',
+            'sku-results-container',
+            'batch-results-container',
+            'filter-results-container'
+        ];
+        
+        allResultsContainers.forEach(containerId => {
+            const container = document.getElementById(containerId);
+            if (container) {
+                container.style.display = 'none';
+                // Also clear the grid content
+                const grid = document.getElementById(containerId.replace('-container', '-grid'));
+                if (grid) {
+                    grid.innerHTML = '';
+                }
+                // Clear count badge
+                const countBadge = document.getElementById(containerId.replace('-container', '-count'));
+                if (countBadge) {
+                    countBadge.textContent = '';
+                }
+            }
+        });
     }
 
     initMobileMenu() {

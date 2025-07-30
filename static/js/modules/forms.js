@@ -1,8 +1,8 @@
 // ================================================
-// Forms Manager Module
+// Form Manager Module
 // ================================================
 
-import { ApiClient } from '../utils/api.js';
+import { ApiClient } from '../utils/api.js?v=5';
 
 export class FormManager {
     constructor(app) {
@@ -117,9 +117,39 @@ export class FormManager {
     async handleSkuSearch(e) {
         e.preventDefault();
         
-        this.app.showLoading('Searching for SKU...');
+        // Always use enhanced SKU search with image similarity
+        this.app.showLoading('Performing SKU search with image similarity...');
         
-        const formData = new FormData(e.target);
+        const formData = new FormData();
+        formData.append('sku', document.getElementById('sku-input').value);
+        
+        // Collect matching columns
+        const selectedColumns = [];
+        document.querySelectorAll('#sku-matching-columns input[type="checkbox"]:checked').forEach(checkbox => {
+            selectedColumns.push(checkbox.value);
+        });
+        formData.append('matching_columns', JSON.stringify(selectedColumns));
+        
+        // Check if dual engine is enabled for SKU search
+        const dualEngineEnabled = document.getElementById('sku-dual-engine')?.checked || false;
+        
+        // Add other options
+        formData.append('dual_engine', dualEngineEnabled);
+        formData.append('exclude_same_model', document.getElementById('sku-exclude-same-model')?.checked || false);
+        formData.append('group_unisex', document.getElementById('sku-group-unisex')?.checked || false);
+        formData.append('top_k', document.getElementById('sku-top-k')?.value || 20);
+        formData.append('allowed_status_codes', JSON.stringify(['IL'])); // Default to IL status
+        
+        // Add weight parameters if dual engine is enabled
+        if (dualEngineEnabled) {
+            const mainWeight = parseFloat(document.getElementById('sku-main-weight')?.value || 0.7);
+            const measurementWeight = parseFloat(document.getElementById('sku-measurement-weight')?.value || 0.3);
+            
+            formData.append('main_weight', mainWeight);
+            formData.append('measurement_weight', measurementWeight);
+            
+            console.log(`🔍 SKU dual-index search with weights: Visual=${mainWeight}, Technical=${measurementWeight}`);
+        }
         
         try {
             const result = await this.api.post('/search/sku', formData);
@@ -128,6 +158,19 @@ export class FormManager {
                 this.app.showError(result.error);
                 this.app.hideLoading();
             } else {
+                // Show results with source SKU info
+                if (result.source_sku) {
+                    console.log('Source SKU:', result.source_sku);
+                    console.log('Pre-filters applied:', result.prefilters_applied);
+                    console.log('Post-filters applied:', result.postfilters_applied);
+                    if (result.dual_engine) {
+                        console.log('Dual engine weights:', { 
+                            main: result.main_weight || 0.7, 
+                            measurement: result.measurement_weight || 0.3 
+                        });
+                    }
+                }
+                
                 this.app.showResults(
                     result.results || [], 
                     'sku-results-container', 

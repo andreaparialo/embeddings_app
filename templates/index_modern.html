@@ -171,14 +171,80 @@
                         </div>
                         <div>
                             <h2 class="section-title">Search by SKU</h2>
-                            <p class="text-muted">Find products by their SKU code</p>
+                            <p class="text-muted">Find visually similar products using a SKU's image</p>
                         </div>
                     </div>
                     
                     <form id="sku-search-form">
                         <div class="form-group">
                             <label for="sku-input" class="form-label">SKU Code</label>
-                            <input type="text" class="form-control" id="sku-input" name="sku_cod" placeholder="Enter SKU code" required>
+                            <input type="text" class="form-control" id="sku-input" name="sku" required>
+                        </div>
+
+                        <!-- Dual Engine Option -->
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="sku-dual-engine" checked>
+                            <label class="form-check-label" for="sku-dual-engine">
+                                <i class="fas fa-layer-group"></i> Enable Dual-Index Search
+                            </label>
+                            <small class="text-muted d-block">Combine visual and technical features</small>
+                        </div>
+
+                        <!-- Weight Controls for SKU Search -->
+                        <div id="sku-dual-weights-controls" style="display: block;">
+                            <div class="row">
+                                <div class="col-6">
+                                    <label class="form-label small">Visual Weight</label>
+                                    <input type="range" class="form-range" id="sku-main-weight" min="0" max="1" step="0.1" value="0.7">
+                                    <div class="text-center small" id="sku-main-weight-display">70%</div>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Technical Weight</label>
+                                    <input type="range" class="form-range" id="sku-measurement-weight" min="0" max="1" step="0.1" value="0.3">
+                                    <div class="text-center small" id="sku-measurement-weight-display">30%</div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle"></i> 
+                                    <strong>Visual:</strong> GME image similarity | <strong>Technical:</strong> Measurement features
+                                </small>
+                            </div>
+                        </div>
+
+                            <!-- Matching Columns Configuration -->
+                            <div class="form-group mb-3">
+                                <label class="form-label">Matching Columns</label>
+                                <div class="filter-options-grid" id="sku-matching-columns">
+                                    <!-- Will be populated dynamically -->
+                                </div>
+                            </div>
+                            
+                            <!-- Additional Options -->
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sku-exclude-same-model" checked>
+                                        <label class="form-check-label" for="sku-exclude-same-model">
+                                            Exclude Same Model
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sku-group-unisex">
+                                        <label class="form-check-label" for="sku-group-unisex">
+                                            Group Unisex Products
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Results Count -->
+                            <div class="form-group mt-3">
+                                <label for="sku-top-k" class="form-label">Number of Results</label>
+                                <input type="number" class="form-control" id="sku-top-k" value="20" min="1" max="100">
+                            </div>
                         </div>
                         
                         <button type="submit" class="btn btn-primary" {% if not initialization_status.initialized %}disabled{% endif %}>
@@ -621,10 +687,98 @@
                 // Initialize displays
                 updateWeights();
             }
+            
+            // Handle enhanced SKU search mode toggle
+            // (SKU search now always uses image similarity, so no toggle needed)
+            
+            // Handle SKU dual engine checkbox toggle
+            const skuDualEngineCheckbox = document.getElementById('sku-dual-engine');
+            const skuDualWeightsControls = document.getElementById('sku-dual-weights-controls');
+            const skuMainWeightSlider = document.getElementById('sku-main-weight');
+            const skuMeasurementWeightSlider = document.getElementById('sku-measurement-weight');
+            const skuMainWeightDisplay = document.getElementById('sku-main-weight-display');
+            const skuMeasurementWeightDisplay = document.getElementById('sku-measurement-weight-display');
+            
+            if (skuDualEngineCheckbox) {
+                skuDualEngineCheckbox.addEventListener('change', function() {
+                    if (this.checked) {
+                        skuDualWeightsControls.style.display = 'block';
+                    } else {
+                        skuDualWeightsControls.style.display = 'none';
+                    }
+                });
+            }
+            
+            // Handle SKU weight sliders
+            function updateSkuWeights() {
+                const mainWeight = parseFloat(skuMainWeightSlider.value);
+                const measurementWeight = parseFloat(skuMeasurementWeightSlider.value);
+                
+                // Normalize weights to sum to 1.0
+                const total = mainWeight + measurementWeight;
+                if (total > 0) {
+                    const normalizedMain = mainWeight / total;
+                    const normalizedMeasurement = measurementWeight / total;
+                    
+                    skuMainWeightDisplay.textContent = Math.round(normalizedMain * 100) + '%';
+                    skuMeasurementWeightDisplay.textContent = Math.round(normalizedMeasurement * 100) + '%';
+                }
+            }
+            
+            if (skuMainWeightSlider && skuMeasurementWeightSlider) {
+                skuMainWeightSlider.addEventListener('input', function() {
+                    // Auto-adjust measurement weight to maintain balance
+                    const mainVal = parseFloat(this.value);
+                    skuMeasurementWeightSlider.value = (1.0 - mainVal).toFixed(1);
+                    updateSkuWeights();
+                });
+                
+                skuMeasurementWeightSlider.addEventListener('input', function() {
+                    // Auto-adjust main weight to maintain balance
+                    const measurementVal = parseFloat(this.value);
+                    skuMainWeightSlider.value = (1.0 - measurementVal).toFixed(1);
+                    updateSkuWeights();
+                });
+                
+                // Initialize displays
+                updateSkuWeights();
+            }
+            
+            // Populate SKU matching columns
+            const skuMatchingColumns = document.getElementById('sku-matching-columns');
+            if (skuMatchingColumns && window.filterOptions) {
+                // Use the same priority columns as batch search
+                const priorityColumns = [
+                    'SHAPE_SEMI_GROUPED',
+                    'BRAND_CLUSTER', 
+                    'PRODUCT_TYPE_COD',
+                    'USERGENDER_DES',
+                    'CTM_FIRST_TEMPLE_MATERIAL_DES',
+                    'CTM_FIRST_FRONT_MATERIAL_DES',
+                    'MACRO_SHAPE_AWS',
+                    'GRANULAR_SHAPE_AWS'
+                ];
+                
+                // Create checkboxes for priority columns that exist
+                priorityColumns.forEach(col => {
+                    if (window.filterOptions.includes(col)) {
+                        const div = document.createElement('div');
+                        div.className = 'form-check';
+                        div.innerHTML = `
+                            <input class="form-check-input" type="checkbox" value="${col}" id="sku-col-${col}" 
+                                ${['SHAPE_SEMI_GROUPED', 'BRAND_CLUSTER', 'PRODUCT_TYPE_COD'].includes(col) ? 'checked' : ''}>
+                            <label class="form-check-label" for="sku-col-${col}">
+                                ${col.replace(/_/g, ' ')}
+                            </label>
+                        `;
+                        skuMatchingColumns.appendChild(div);
+                    }
+                });
+            }
         });
     </script>
     
     <!-- Application JavaScript -->
-    <script type="module" src="/static/js/app.js?v=4"></script>
+    <script type="module" src="/static/js/app.js?v=5"></script>
 </body>
 </html> 

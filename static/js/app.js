@@ -2,15 +2,15 @@
 // Vision Search - Main Application
 // ================================================
 
-import { NavigationManager } from './modules/navigation.js';
-import { FormManager } from './modules/forms.js';
-import { ResultsManager } from './modules/results.js';
-import { FilterManager } from './modules/filters.js';
-import { LoadingManager } from './modules/loading.js';
-import { BatchViewerManager } from './modules/batchViewer.js';
-import { FileUploadManager } from './modules/fileUpload.js';
-import { SidebarComponent } from './modules/sidebar.js';
-import { ProductCardComponent } from './modules/productCard.js';
+import { NavigationManager } from './modules/navigation.js?v=5';
+import { FormManager } from './modules/forms.js?v=5';
+import { ResultsManager } from './modules/results.js?v=5';
+import { FilterManager } from './modules/filters.js?v=5';
+import { LoadingManager } from './modules/loading.js?v=5';
+import { BatchViewerManager } from './modules/batchViewer.js?v=5';
+import { FileUploadManager } from './modules/fileUpload.js?v=5';
+import { SidebarComponent } from './modules/sidebar.js?v=5';
+import { ProductCardComponent } from './modules/productCard.js?v=5';
 
 class VisionSearchApp {
     constructor() {

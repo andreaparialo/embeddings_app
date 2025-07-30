@@ -239,13 +239,21 @@ class DualIndexDataLoader:
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
         
         # If filters are provided, use the optimized search with pre-filtering
-        if filters and self.df is not None and hasattr(self.main_data_loader, 'idx_to_filename_root'):
+        if filters and self.df is not None and hasattr(self.main_data_loader, 'idx_to_filename_root') and self.main_embeddings is not None:
             try:
                 logger.info(f"🔍 Using pre-filtered search with filters: {filters}")
-                logger.info(f"📊 Filter validation: df={self.df is not None}, idx_mapping={hasattr(self.main_data_loader, 'idx_to_filename_root')}")
+                logger.info(f"📊 Filter validation: df={self.df is not None}, embeddings={self.main_embeddings is not None}, idx_mapping={hasattr(self.main_data_loader, 'idx_to_filename_root')}")
                 # Use the same pre-filtering logic as regular batch search
                 from optimized_faiss_search import OptimizedFAISSSearch
-                optimized_search = OptimizedFAISSSearch(self.df, self.main_index, self.main_data_loader.idx_to_filename_root)
+                
+                # Create OptimizedFAISSSearch with correct parameters
+                optimized_search = OptimizedFAISSSearch(
+                    index=self.main_index,
+                    embeddings=self.main_embeddings,  # Use the embeddings!
+                    metadata_df=self.df,
+                    filename_to_idx=getattr(self.main_data_loader, 'filename_to_idx', {}),
+                    idx_to_filename=getattr(self.main_data_loader, 'idx_to_filename_root', {})
+                )
                 
                 # Use search_with_prefilter which applies filters before FAISS search
                 distances, indices = optimized_search.search_with_prefilter(
@@ -261,6 +269,8 @@ class DualIndexDataLoader:
                 logger.info("🔍 Using raw FAISS search (no filters provided)")
             elif self.df is None:
                 logger.warning("⚠️ Cannot use filtered search: df is None")
+            elif self.main_embeddings is None:
+                logger.warning("⚠️ Cannot use filtered search: embeddings are None")
             elif not hasattr(self.main_data_loader, 'idx_to_filename_root'):
                 logger.warning("⚠️ Cannot use filtered search: idx_to_filename_root not available")
         

@@ -713,7 +713,200 @@
                 </div>
             </div>
 
-            <!-- Other views will be added here -->
+            <!-- SKU Search View -->
+            <div class="view" id="sku-search-view">
+                <div class="view-container">
+                    <div class="search-section">
+                        <div class="section-header">
+                            <div class="section-icon">
+                                <i class="ph-barcode"></i>
+                            </div>
+                            <div>
+                                <h3 class="section-title">SKU Search</h3>
+                                <p class="text-secondary">Find visually similar products using a SKU's image</p>
+                            </div>
+                        </div>
+                        
+                        <form id="sku-search-form">
+                            <div class="form-group">
+                                <label for="sku-input" class="form-label">SKU Code</label>
+                                <input type="text" class="form-control" id="sku-input" name="sku" required placeholder="Enter SKU code">
+                            </div>
+
+                            <!-- Dual Engine Option -->
+                            <div class="form-check mb-3">
+                                <input class="form-check-input" type="checkbox" id="sku-dual-engine" checked>
+                                <label class="form-check-label" for="sku-dual-engine">
+                                    <i class="ph-layer-group"></i> Enable Dual-Index Search
+                                </label>
+                                <small class="text-muted d-block">Combine visual and technical features</small>
+                            </div>
+
+                            <!-- Weight Controls for SKU Search -->
+                            <div id="sku-dual-weights-controls" style="display: block;">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <label class="form-label small">Visual Weight</label>
+                                        <input type="range" class="form-range" id="sku-main-weight" min="0" max="1" step="0.1" value="0.7">
+                                        <div class="text-center small" id="sku-main-weight-display">70%</div>
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label small">Technical Weight</label>
+                                        <input type="range" class="form-range" id="sku-measurement-weight" min="0" max="1" step="0.1" value="0.3">
+                                        <div class="text-center small" id="sku-measurement-weight-display">30%</div>
+                                    </div>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted">
+                                        <i class="ph-info"></i> 
+                                        <strong>Visual:</strong> GME image similarity | <strong>Technical:</strong> Measurement features
+                                    </small>
+                                </div>
+                            </div>
+
+                            <!-- Matching Columns Configuration -->
+                            <div class="form-group mb-3">
+                                <label class="form-label">Matching Columns</label>
+                                <div class="filter-options-grid" id="sku-matching-columns">
+                                    <!-- Will be populated dynamically -->
+                                </div>
+                            </div>
+                            
+                            <!-- Additional Options -->
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sku-exclude-same-model" checked>
+                                        <label class="form-check-label" for="sku-exclude-same-model">
+                                            Exclude Same Model
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sku-group-unisex">
+                                        <label class="form-check-label" for="sku-group-unisex">
+                                            Group Unisex Products
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Results Count -->
+                            <div class="form-group mt-3">
+                                <label for="sku-top-k" class="form-label">Number of Results</label>
+                                <input type="number" class="form-control" id="sku-top-k" value="5" min="1" max="100">
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1.5rem;">
+                                <i class="ph-magnifying-glass"></i>
+                                Search SKU
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Results Container -->
+                    <div class="results-container" id="sku-results-container" style="display: none;">
+                        <div class="results-header">
+                            <h3>Search Results</h3>
+                            <span class="badge" id="sku-results-count">5 results</span>
+                        </div>
+                        <div class="results-grid" id="sku-results-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Batch Search View -->
+            <div class="view" id="batch-search-view">
+                <div class="view-container">
+                    <div class="search-section">
+                        <div class="section-header">
+                            <div class="section-icon">
+                                <i class="ph-file-xls"></i>
+                            </div>
+                            <div>
+                                <h3 class="section-title">Batch Search</h3>
+                                <p class="text-secondary">Process multiple SKUs from Excel file</p>
+                            </div>
+                        </div>
+                        
+                        <div class="alert alert-success">
+                            <i class="ph-rocket"></i>
+                            <div>
+                                <strong>Performance Optimization Active!</strong><br>
+                                SKUs are automatically grouped by image. Multiple SKUs sharing the same product image are processed together!<br>
+                                <small>NEW: Batches with >10 unique images use parallel processing (16 images at once)!</small>
+                            </div>
+                        </div>
+                        
+                        <form id="excel-search-form" enctype="multipart/form-data">
+                            <div class="form-group">
+                                <label class="form-label">Upload Excel File</label>
+                                <div class="file-upload-area" id="excel-drop-zone">
+                                    <input type="file" class="file-input" id="excel-file" name="file" accept=".xlsx,.xls" required>
+                                    <i class="ph-file-xls upload-icon"></i>
+                                    <h4>Drop Excel file here or click to browse</h4>
+                                    <p class="text-secondary">SKU codes should be in the first column</p>
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1.5rem;">
+                                <i class="ph-upload"></i>
+                                Process Batch
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Results Container -->
+                    <div class="results-container" id="batch-results-container" style="display: none;">
+                        <div class="results-header">
+                            <h3>Batch Results</h3>
+                            <span class="badge" id="batch-results-count"></span>
+                        </div>
+                        <div class="results-grid" id="batch-search-grid"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filter Search View -->
+            <div class="view" id="filter-search-view">
+                <div class="view-container">
+                    <div class="search-section">
+                        <div class="section-header">
+                            <div class="section-icon">
+                                <i class="ph-funnel"></i>
+                            </div>
+                            <div>
+                                <h3 class="section-title">Filter Search</h3>
+                                <p class="text-secondary">Search products using filters and attributes</p>
+                            </div>
+                        </div>
+                        
+                        <form id="filter-search-form">
+                            <div class="filter-section">
+                                <h6>Product Filters</h6>
+                                <div class="filter-options-grid" id="filter-options">
+                                    <!-- Will be populated dynamically -->
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1.5rem;">
+                                <i class="ph-magnifying-glass"></i>
+                                Apply Filters
+                            </button>
+                        </form>
+                    </div>
+                    
+                    <!-- Results Container -->
+                    <div class="results-container" id="filter-results-container" style="display: none;">
+                        <div class="results-header">
+                            <h3>Filter Results</h3>
+                            <span class="badge" id="filter-results-count"></span>
+                        </div>
+                        <div class="results-grid" id="filter-results-grid"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </main>
 

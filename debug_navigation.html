@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Navigation Debug Test</title>
+</head>
+<body>
+    <h1>Navigation Debug Test</h1>
+    <p>Open browser console and check if these messages appear:</p>
+    <ul>
+        <li>✅ "NavigationManager" should be defined</li>
+        <li>✅ "clearAllResults" method should exist</li>
+        <li>✅ No JavaScript errors</li>
+    </ul>
+    
+    <script type="module">
+        try {
+            // Test import
+            import { NavigationManager } from '/static/js/modules/navigation.js?v=5';
+            console.log('✅ NavigationManager imported successfully');
+            
+            // Test if clearAllResults method exists
+            const nav = new NavigationManager();
+            if (typeof nav.clearAllResults === 'function') {
+                console.log('✅ clearAllResults method found');
+            } else {
+                console.error('❌ clearAllResults method not found');
+            }
+            
+        } catch (error) {
+            console.error('❌ Import failed:', error);
+        }
+    </script>
+</body>
+</html>

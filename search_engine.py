@@ -408,8 +408,26 @@ class HybridSearchEngine:
     
     def _get_image_path(self, filename_root: str) -> Optional[str]:
         """Get the actual image path for a filename_root"""
-        # Use data_loader's implementation which handles path normalization
-        return data_loader.get_image_path(filename_root)
+        import os
+        
+        # Direct search in db_pictures_512 directory (same logic as app.py)
+        # Assuming the app directory can be determined
+        try:
+            # Try to get app directory from current working directory
+            app_dir = os.getcwd()
+            db_pictures_dir = os.path.join(app_dir, 'db_pictures_512')
+            
+            for ext in ['.jpg', '.JPG', '.jpeg', '.JPEG']:
+                filename = f"{filename_root}{ext}"
+                path = os.path.join(db_pictures_dir, filename)
+                if os.path.exists(path):
+                    return f"/db_pictures_512/{filename}"
+            
+            return None
+            
+        except Exception as e:
+            # Fallback: just return the expected web path
+            return f"/db_pictures_512/{filename_root}.jpg"
     
     def get_filter_options(self) -> Dict[str, List]:
         """Get unique values for each filterable column"""

@@ -2,9 +2,11 @@
 // Results Manager Module
 // ================================================
 
+import { ProductCardComponent } from './productCard.js?v=5';
+
 export class ResultsManager {
     constructor() {
-        this.resultCardTemplate = null;
+        this.productCard = new ProductCardComponent();
     }
 
     showResults(results, containerId, countId) {
@@ -17,15 +19,37 @@ export class ResultsManager {
             return;
         }
         
+        // Make sure the container is visible
+        container.style.display = 'block';
+        
         // Update count
         countBadge.textContent = `${results.length} results`;
         
         // Clear existing results
         grid.innerHTML = '';
         
-        // Add new results
-        results.forEach(result => {
-            const card = this.createResultCard(result);
+        // Sort results by similarity score if available (higher = better)
+        const sortedResults = results.sort((a, b) => {
+            const aScore = a.similarity_score !== undefined ? (1 - a.similarity_score) : 0;
+            const bScore = b.similarity_score !== undefined ? (1 - b.similarity_score) : 0;
+            return bScore - aScore; // Descending order (best first)
+        });
+        
+        // Add new results using ProductCardComponent
+        sortedResults.forEach((result, index) => {
+            const card = this.productCard.createCard(result, {
+                showSimilarity: result.similarity_score !== undefined,
+                size: 'normal',
+                layout: 'vertical',
+                clickable: true,
+                showDetails: true,
+                maxDetails: 4
+            });
+            
+            card.dataset.resultIndex = index;
+            card.classList.add('result-card');
+            
+            // Append the actual DOM element directly
             grid.appendChild(card);
         });
         
@@ -44,107 +68,8 @@ export class ResultsManager {
         if (window.visionSearchApp) {
             window.visionSearchApp.hideLoading();
         }
-    }
-
-    createResultCard(result) {
-        const card = document.createElement('div');
-        card.className = 'result-card';
         
-        // Build image HTML
-        let imageHtml = '';
-        if (result.image_path) {
-            const imgSrc = `/${result.image_path}`;
-            imageHtml = `
-                <img src="${imgSrc}" 
-                     class="result-image" 
-                     alt="Product Image" 
-                     loading="lazy"
-                     onerror="this.onerror=null; this.src='/static/images/no-image.svg';">
-            `;
-        } else {
-            imageHtml = `
-                <div class="result-image no-image">
-                    <i class="fas fa-image"></i>
-                    <span>No Image</span>
-                </div>
-            `;
-        }
-        
-        // Build similarity badge if applicable
-        let similarityHtml = '';
-        if (result.similarity_score !== undefined) {
-            const percentage = ((1 - result.similarity_score) * 100).toFixed(1);
-            similarityHtml = `<div class="similarity-badge">${percentage}%</div>`;
-        }
-        
-        // Build card HTML
-        card.innerHTML = `
-            ${similarityHtml}
-            ${imageHtml}
-            <div class="result-content">
-                <h6 class="result-sku">${this.escapeHtml(result.SKU_COD || 'N/A')}</h6>
-                <div class="result-details">
-                    ${this.buildDetailsHtml(result)}
-                </div>
-                ${result.filename_root ? `
-                    <div class="result-meta">
-                        <small class="text-muted">File: ${this.escapeHtml(result.filename_root)}</small>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-        
-        // Add click handler for detailed view
-        card.addEventListener('click', () => {
-            this.showDetailedView(result);
-        });
-        
-        return card;
-    }
-
-    buildDetailsHtml(result) {
-        const details = [
-            { label: 'Brand', value: result.BRAND_DES },
-            { label: 'Cluster', value: result.BRAND_CLUSTER },
-            { label: 'Gender', value: result.USERGENDER_DES },
-            { label: 'Color', value: result.COLOR_FAMILY_1_DES, extra: result.COLOR },
-            { label: 'Shape', value: result.SHAPE_SEMI_GROUPED },
-            { label: 'Price', value: result.ACT_SKU_PRICE_VAL }
-        ];
-        
-        return details
-            .filter(d => d.value)
-            .map(d => `
-                <div class="detail-item">
-                    <strong>${d.label}:</strong> 
-                    ${this.escapeHtml(d.value)}
-                    ${d.extra ? ` (${this.escapeHtml(d.extra)})` : ''}
-                </div>
-            `)
-            .join('');
-    }
-
-    showDetailedView(result) {
-        // TODO: Implement modal or side panel for detailed product view
-        console.log('Show detailed view for:', result);
-    }
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
-
-    clearResults(containerId) {
-        const container = document.getElementById(containerId);
-        const grid = document.getElementById(containerId.replace('-container', '-grid'));
-        
-        if (container) {
-            container.style.display = 'none';
-        }
-        
-        if (grid) {
-            grid.innerHTML = '';
-        }
+        // Preload some images for better performance
+        this.productCard.preloadImages(sortedResults.slice(0, 10));
     }
 } 
