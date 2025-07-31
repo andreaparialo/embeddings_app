@@ -325,6 +325,11 @@ class OptimizedBatchProcessor:
         if config_filtering.ENABLE_BASELINE_DATE_FILTER:
             logger.info(f"  🚫 Date filter: Excluding {config_filtering.BASELINE_EXCLUDE_YEARS} years and {config_filtering.BASELINE_EXCLUDE_DATES} dates")
         
+        if dual_engine_enabled:
+            logger.info(f"🎭 Dual Engine Mode Summary:")
+            logger.info(f"  Search mode: {search_mode}")
+            logger.info(f"  Weights: GME={main_weight:.1%}, Technical={measurement_weight:.1%}")
+        
         # Show cache stats
         cache_stats = self.optimized_search.get_cache_stats()
         logger.info(f"💾 Filter cache: {cache_stats['cache_size']} entries cached")
@@ -408,7 +413,7 @@ class OptimizedBatchProcessor:
                 # and search for the corresponding measurement embedding in the dual index system
                 
                 # Debug: Log filters being applied
-                logger.debug(f"🔍 Debug [{query_id}]: Applying filters {filters}")
+                logger.debug(f"🔍 Debug [{query_id}]: Search mode={search_mode}, Filters={filters}")
                 
                 if search_mode == "global":
                     # Mode 1: Global Search - Search all products with FAISS, then apply filters
@@ -428,10 +433,17 @@ class OptimizedBatchProcessor:
                 measurement_embedding = dual_index_loader.get_measurement_embedding_by_filename(filename_root)
                 
                 if measurement_embedding is not None:
-                    # 3. Search measurement index (no filters supported)
-                    meas_distances, meas_indices = dual_index_loader.search_measurement_index(
-                        measurement_embedding, top_k * 2
-                    )
+                    # 3. Search measurement index with appropriate filtering based on mode
+                    if search_mode == "global":
+                        # Mode 1: Global Search - No filters during search
+                        meas_distances, meas_indices = dual_index_loader.search_measurement_index(
+                            measurement_embedding, top_k * 2
+                        )
+                    else:
+                        # Mode 2: Filtered Search - Apply same filters as main index
+                        meas_distances, meas_indices = dual_index_loader.search_measurement_index_with_filters(
+                            measurement_embedding, top_k * 2, filters
+                        )
                     logger.debug(f"Query {filename_root}: Found measurement embedding, searching both indexes")
                 else:
                     # No measurement embedding available
@@ -482,8 +494,9 @@ class OptimizedBatchProcessor:
                             if matches_filters:
                                 filtered_results.append(result)
                     
+                    original_count = len(combined_results)
                     combined_results = filtered_results
-                    logger.info(f"Global mode post-filtering: {len(combined_results)} results after filtering")
+                    logger.info(f"🎯 Global mode post-filtering for {query_id}: {original_count} → {len(filtered_results)} results after filtering")
                 
                 for result in combined_results:
                     # Get the filename_root from the result

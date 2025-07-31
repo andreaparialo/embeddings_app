@@ -355,7 +355,7 @@
                             </div>
                             <div class="col-md-6">
                                 <div class="form-check">
-                                    <input class="form-check-input" type="checkbox" id="dual-engine" name="dual_engine">
+                                    <input class="form-check-input" type="checkbox" id="dual-engine" name="dual_engine" checked>
                                     <label class="form-check-label" for="dual-engine">
                                         <strong>🚀 Dual Engine Mode</strong> (Experimental)
                                     </label>
@@ -364,11 +364,25 @@
                         </div>
                         
                         <!-- Dual Engine Settings (shown when dual engine is checked) -->
-                        <div id="dual-engine-settings" class="row mb-3" style="display: none;">
+                        <div id="dual-engine-settings" class="row mb-3" style="display: flex;">
+                            <div class="col-12 mb-2">
+                                <label class="form-label"><i class="fas fa-sliders-h"></i> Weight Configuration</label>
+                                <div class="d-flex gap-2 mb-2">
+                                    <button type="button" class="btn btn-sm btn-secondary preset-weight" data-main="0.7" data-measurement="0.3">
+                                        <i class="fas fa-eye"></i> Visual Focus (70/30)
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-secondary preset-weight" data-main="0.5" data-measurement="0.5">
+                                        <i class="fas fa-balance-scale"></i> Balanced (50/50)
+                                    </button>
+                                    <button type="button" class="btn btn-sm btn-secondary preset-weight" data-main="0.3" data-measurement="0.7">
+                                        <i class="fas fa-ruler-combined"></i> Technical Focus (30/70)
+                                    </button>
+                                </div>
+                            </div>
                             <div class="col-md-6">
                                 <div class="weight-control">
                                     <label class="form-label text-center d-block">
-                                        <i class="fas fa-image"></i> GME Weight
+                                        <i class="fas fa-image"></i> GME Visual Weight
                                     </label>
                                     <input type="range" class="form-range" id="batch-main-weight" min="0" max="1" step="0.1" value="0.7">
                                     <div class="text-center small" id="batch-main-weight-display">70%</div>
@@ -377,7 +391,7 @@
                             <div class="col-md-6">
                                 <div class="weight-control">
                                     <label class="form-label text-center d-block">
-                                        <i class="fas fa-ruler"></i> Technical Weight
+                                        <i class="fas fa-ruler"></i> Technical Measurement Weight
                                     </label>
                                     <input type="range" class="form-range" id="batch-measurement-weight" min="0" max="1" step="0.1" value="0.3">
                                     <div class="text-center small" id="batch-measurement-weight-display">30%</div>
@@ -385,19 +399,24 @@
                             </div>
                         </div>
                         
-                        <div id="search-mode-settings" class="row mb-3" style="display: none;">
+                        <div id="search-mode-settings" class="row mb-3" style="display: block;">
                             <div class="col-12">
-                                <label class="form-label">Search Mode</label>
-                                <div class="form-check">
+                                <label class="form-label"><i class="fas fa-route"></i> Search Mode Selection</label>
+                                <div class="alert alert-info mb-2">
+                                    <small>Choose how the dual engine combines results from both indexes</small>
+                                </div>
+                                <div class="form-check mb-2">
                                     <input class="form-check-input" type="radio" name="search_mode" id="search-mode-global" value="global" checked>
                                     <label class="form-check-label" for="search-mode-global">
-                                        <strong>Global Search</strong> - Search all products, then apply filters (Faster, may miss some filtered matches)
+                                        <strong>🌍 Mode 1: Global Search</strong><br>
+                                        <small class="text-muted">Search all products first, then apply filters. Faster but may include less relevant matches.</small>
                                     </label>
                                 </div>
                                 <div class="form-check">
                                     <input class="form-check-input" type="radio" name="search_mode" id="search-mode-filtered" value="filtered">
                                     <label class="form-check-label" for="search-mode-filtered">
-                                        <strong>Filtered Search</strong> - Apply filters first, then search within subset (Slower, finds best matches within criteria)
+                                        <strong>🎯 Mode 2: Filtered Search</strong><br>
+                                        <small class="text-muted">Apply filters before searching. Slower but finds the best matches within your criteria.</small>
                                     </label>
                                 </div>
                             </div>
@@ -870,6 +889,29 @@
                 // Initialize display
                 updateBatchWeights();
             }
+            
+            // Handle preset weight buttons
+            document.querySelectorAll('.preset-weight').forEach(button => {
+                button.addEventListener('click', function() {
+                    const mainWeight = parseFloat(this.dataset.main);
+                    const measurementWeight = parseFloat(this.dataset.measurement);
+                    
+                    // Update sliders
+                    if (batchMainWeightSlider && batchMeasurementWeightSlider) {
+                        batchMainWeightSlider.value = mainWeight;
+                        batchMeasurementWeightSlider.value = measurementWeight;
+                        updateBatchWeights();
+                    }
+                    
+                    // Visual feedback
+                    document.querySelectorAll('.preset-weight').forEach(btn => {
+                        btn.classList.remove('btn-primary');
+                        btn.classList.add('btn-secondary');
+                    });
+                    this.classList.remove('btn-secondary');
+                    this.classList.add('btn-primary');
+                });
+            });
         });
     </script>
     

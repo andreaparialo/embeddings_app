@@ -312,6 +312,79 @@ class DualIndexDataLoader:
         distances, indices = self.measurement_index.search(query_embedding, top_k)
         return distances[0], indices[0]
     
+    def search_measurement_index_with_filters(self, query_embedding: np.ndarray, top_k: int = 50, filters: Dict = None) -> Tuple[np.ndarray, np.ndarray]:
+        """Search in measurement index with optional filtering"""
+        if self.measurement_index is None:
+            raise ValueError("Measurement index not loaded")
+        
+        query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
+        
+        # If no filters, use standard search
+        if not filters or not self.df:
+            logger.info("🔍 Using raw measurement search (no filters)")
+            distances, indices = self.measurement_index.search(query_embedding, top_k * 3)  # Get more results for filtering
+            return distances[0], indices[0]
+        
+        # Apply filters to measurement index
+        logger.info(f"🔍 Using filtered measurement search with filters: {filters}")
+        
+        # First, get a larger set of results
+        distances, indices = self.measurement_index.search(query_embedding, top_k * 5)
+        distances = distances[0]
+        indices = indices[0]
+        
+        # Filter the results based on product attributes
+        filtered_distances = []
+        filtered_indices = []
+        
+        for i, meas_idx in enumerate(indices):
+            if meas_idx in self.measurement_path_mapping:
+                normalized_path = self.measurement_path_mapping[meas_idx]['normalized']
+                filename_root = os.path.basename(normalized_path).replace('.jpg', '')
+                
+                # Get products matching this filename_root
+                matching_products = self.df[self.df['filename_root'] == filename_root]
+                if matching_products.empty:
+                    continue
+                
+                # Check if any product matches all filters
+                match_found = False
+                for _, product in matching_products.iterrows():
+                    all_match = True
+                    for filter_key, filter_value in filters.items():
+                        if filter_key in product:
+                            product_val = product[filter_key]
+                            # Handle list values (like status codes)
+                            if isinstance(filter_value, list):
+                                if product_val not in filter_value:
+                                    all_match = False
+                                    break
+                            else:
+                                if product_val != filter_value:
+                                    all_match = False
+                                    break
+                    
+                    if all_match:
+                        match_found = True
+                        break
+                
+                if match_found:
+                    filtered_distances.append(distances[i])
+                    filtered_indices.append(meas_idx)
+                    
+                    if len(filtered_indices) >= top_k:
+                        break
+        
+        logger.info(f"📊 Measurement filter results: {len(indices)} → {len(filtered_indices)} products")
+        
+        # If we have enough filtered results, return them
+        if filtered_indices:
+            return np.array(filtered_distances), np.array(filtered_indices)
+        else:
+            # No results after filtering, return empty arrays
+            logger.warning("⚠️ No measurement results after filtering")
+            return np.array([]), np.array([])
+    
     def combine_search_results(self, main_distances: np.ndarray, main_indices: np.ndarray,
                               measurement_distances: np.ndarray, measurement_indices: np.ndarray,
                               top_k: int = 50) -> List[Dict]:
@@ -338,12 +411,18 @@ class DualIndexDataLoader:
             for i, (main_idx, main_sim) in enumerate(zip(main_indices, main_similarities)):
                 if main_idx < len(self.main_metadata["image_paths"]):
                     image_path = self.main_metadata["image_paths"][main_idx]
+                    # For products only in main index, use a default measurement similarity
+                    # based on the average of existing similarities to avoid unfair penalization
+                    default_meas_sim = 0.5  # Middle of normalized range
                     combined_results[image_path] = {
                         'main_similarity': float(main_sim),
                         'main_rank': i + 1,
                         'measurement_similarity': 0.0,
                         'measurement_rank': None,
-                        'combined_score': float(main_sim * self.main_weight),
+                        'combined_score': float(
+                            main_sim * self.main_weight + 
+                            default_meas_sim * self.measurement_weight
+                        ),
                         'source': 'main_only'
                     }
             
@@ -363,12 +442,17 @@ class DualIndexDataLoader:
                         combined_results[normalized_path]['source'] = 'both_indexes'
                     else:
                         # Product only in measurement index
+                        # Use a default main similarity to avoid unfair penalization
+                        default_main_sim = 0.5  # Middle of normalized range
                         combined_results[normalized_path] = {
                             'main_similarity': 0.0,
                             'main_rank': None,
                             'measurement_similarity': float(meas_sim),
                             'measurement_rank': i + 1,
-                            'combined_score': float(meas_sim * self.measurement_weight),
+                            'combined_score': float(
+                                default_main_sim * self.main_weight +
+                                meas_sim * self.measurement_weight
+                            ),
                             'source': 'measurement_only'
                         }
             
