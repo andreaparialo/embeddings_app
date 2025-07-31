@@ -73,7 +73,8 @@ class DualIndexDataLoader:
                 return False
             
             # Load FAISS index using the proper method - exactly like search_engine.py does
-            if not self.main_data_loader.load_faiss_index(index_dir, "1095", index_id):
+            # Use index_id if provided, otherwise use "1095" as default
+            if not self.main_data_loader.load_faiss_index(index_dir, "1095", index_id or "1095"):
                 logger.error("❌ Failed to load main FAISS index")
                 return False
             
@@ -154,6 +155,29 @@ class DualIndexDataLoader:
                 return False
             
             self.measurement_metadata = measurement_data
+            
+            # Load measurement embeddings if available
+            self.measurement_embeddings_path = "indexes/index_measurements/embeddings.npy"
+            if os.path.exists(self.measurement_embeddings_path):
+                self.measurement_embeddings = np.load(self.measurement_embeddings_path)
+                logger.info(f"✅ Loaded measurement embeddings: {self.measurement_embeddings.shape}")
+                
+                # Create filename to embedding mapping
+                self.measurement_filename_to_idx = {}
+                self.measurement_filename_to_embedding = {}
+                
+                for idx_str, normalized_path in self.measurement_metadata["product_mapping"].items():
+                    idx = int(idx_str)
+                    # Extract filename_root from normalized path
+                    filename_root = os.path.basename(normalized_path).replace('.jpg', '')
+                    self.measurement_filename_to_idx[filename_root] = idx
+                    self.measurement_filename_to_embedding[filename_root] = self.measurement_embeddings[idx]
+                
+                logger.info(f"📊 Created filename mappings for {len(self.measurement_filename_to_embedding)} products")
+            else:
+                logger.warning("⚠️ Measurement embeddings file not found - batch dual search will be limited")
+                self.measurement_embeddings = None
+                self.measurement_filename_to_embedding = {}
             
             # Create path mapping using corrected metadata
             logger.info("🔄 Creating path mapping from corrected metadata...")
@@ -383,6 +407,26 @@ class DualIndexDataLoader:
         except Exception as e:
             logger.error(f"❌ Error combining search results: {e}")
             return []
+    
+    def get_measurement_embedding_by_filename(self, filename_root: str) -> Optional[np.ndarray]:
+        """Get measurement embedding for a filename_root"""
+        if self.measurement_embeddings is None:
+            return None
+        
+        # Try direct match and case variations
+        variations = [
+            filename_root,
+            filename_root.upper(),
+            filename_root.lower()
+        ]
+        
+        for variant in variations:
+            if variant in self.measurement_filename_to_embedding:
+                return self.measurement_filename_to_embedding[variant]
+        
+        # If not found, log for debugging
+        logger.debug(f"Measurement embedding not found for: {filename_root}")
+        return None
     
     def set_scoring_weights(self, main_weight: float, measurement_weight: float):
         """Update the scoring weights for combining results"""

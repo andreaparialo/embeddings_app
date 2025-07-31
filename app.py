@@ -278,7 +278,7 @@ async def startup_event():
         
         if search_engine.initialize(csv_path, index_id=default_index_id):
             current_index = data_loader.get_current_index_info()
-            index_name = current_index['name'] if current_index else 'Unknown'
+            index_name = current_index.get('description', current_index.get('id', 'Unknown')) if current_index else 'Unknown'
             INITIALIZATION_STATUS = {"initialized": True, "message": f"Search engine initialized with index: {index_name}"}
             logger.info(f"Search engine initialized on startup with index: {index_name}")
             logger.info("💡 Note: GME model will be loaded only when image search is used (lazy loading)")
@@ -1024,7 +1024,10 @@ async def enhanced_batch_search(
     allowed_status_codes: str = Form('["IL", "NS", "NF", "OB", "AA"]'),
     group_unisex: bool = Form(False),
     dual_engine: bool = Form(False),
-    return_session: bool = Form(False)
+    return_session: bool = Form(False),
+    main_weight: float = Form(0.7),
+    measurement_weight: float = Form(0.3),
+    search_mode: str = Form("global")
 ):
     """Enhanced batch search with column matching and Excel export"""
     try:
@@ -1035,6 +1038,9 @@ async def enhanced_batch_search(
         logger.info(f"👥 Group unisex: {group_unisex}")
         logger.info(f"🚀 Dual engine mode: {dual_engine}")
         logger.info(f"👁️ Return session (viewer mode): {return_session}")
+        if dual_engine:
+            logger.info(f"🔍 Search mode: {search_mode}")
+            logger.info(f"⚖️ Weights: GME={main_weight:.1%}, Technical={measurement_weight:.1%}")
         
         if not file.filename.endswith(('.xlsx', '.xls')):
             logger.error("❌ Invalid file format - only Excel files allowed")
@@ -1305,7 +1311,9 @@ async def enhanced_batch_search(
                 all_results = batch_proc.process_image_groups_with_prefilter(
                     sku_groups, matching_cols, max_results_per_sku,
                     exclude_same_model, allowed_statuses, group_unisex,
-                    dual_engine_enabled, batch_size=16  # Process 16 images at once
+                    dual_engine_enabled, batch_size=16,  # Process 16 images at once
+                    main_weight=main_weight, measurement_weight=measurement_weight,
+                    search_mode=search_mode if dual_engine_enabled else "global"
                 )
             else:
                 all_results = batch_proc.process_image_groups_parallel(
@@ -1511,7 +1519,14 @@ async def enhanced_batch_search(
                     'dual_engine': dual_engine_enabled,
                     'total_skus': len(sku_list),
                     'total_results': len(all_results),
-                    'unique_images': len(sku_groups)
+                    'unique_images': len(sku_groups),
+                    # Add weight information
+                    'weights': {
+                        'main_weight': main_weight,
+                        'measurement_weight': measurement_weight,
+                        'formula': f"{main_weight:.0%}×GME + {measurement_weight:.0%}×Technical"
+                    } if dual_engine_enabled else None,
+                    'search_mode': search_mode if dual_engine_enabled else None
                 }
                 
                 store_batch_results(session_id, all_results, metadata)

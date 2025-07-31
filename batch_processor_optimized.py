@@ -47,7 +47,10 @@ class OptimizedBatchProcessor:
                                            allowed_statuses: List[str] = None,
                                            group_unisex: bool = False,
                                            dual_engine_enabled: bool = False,
-                                           batch_size: int = 8) -> List[Dict]:
+                                           batch_size: int = 8,
+                                           main_weight: float = 0.7,
+                                           measurement_weight: float = 0.3,
+                                           search_mode: str = "global") -> List[Dict]:
         """
         Process multiple image groups with pre-filtering for optimal performance
         """
@@ -55,6 +58,9 @@ class OptimizedBatchProcessor:
         logger.info(f"🚀 Starting optimized batch processing with PRE-FILTERING")
         logger.info(f"📊 Processing {len(image_groups)} unique images")
         logger.info(f"🔧 Matching columns: {matching_cols}")
+        if dual_engine_enabled:
+            logger.info(f"🔍 Search mode: {search_mode}")
+            logger.info(f"⚖️ Weights: GME={main_weight:.1%}, Technical={measurement_weight:.1%}")
         
         # Define which columns to use for pre-filtering vs post-filtering
         prefilter_columns = config_filtering.get_prefilter_columns()
@@ -135,8 +141,13 @@ class OptimizedBatchProcessor:
         
         if dual_engine_enabled:
             logger.info("🎭 Using DUAL INDEX search with pre-computed embeddings!")
+            logger.info(f"⚖️ Weights: GME={main_weight:.1%}, Technical={measurement_weight:.1%}")
             # Use dual index search - both GME and measurement indexes
-            search_results = self._batch_dual_index_search(queries, max_results_per_sku * 3, query_metadata)
+            search_results = self._batch_dual_index_search(
+                queries, max_results_per_sku * 3, query_metadata,
+                main_weight=main_weight, measurement_weight=measurement_weight,
+                search_mode=search_mode
+            )
         else:
             # Use standard GME-only search with pre-filtering
             search_results = self.optimized_search.batch_search_with_prefilter(
@@ -162,7 +173,12 @@ class OptimizedBatchProcessor:
             items_filtered_out = 0
             
             # Get more results initially to account for post-filtering
-            for distance, embedding_idx in result_indices:
+            for item in result_indices:
+                if len(item) == 3:  # New format with scoring details
+                    distance, embedding_idx, scoring_info = item
+                else:  # Legacy format
+                    distance, embedding_idx = item
+                    scoring_info = None
                 if embedding_idx >= 0:
                     # Convert embedding index back to filename_root
                     if embedding_idx in self.data_loader.idx_to_filename_root:
@@ -177,6 +193,13 @@ class OptimizedBatchProcessor:
                         for _, row in matching_rows.iterrows():
                             item = row.to_dict()
                             item['similarity_score'] = distance
+                            
+                            # Add scoring details if available
+                            if scoring_info:
+                                item['gme_score'] = scoring_info.get('main_similarity', 0.0)
+                                item['technical_score'] = scoring_info.get('measurement_similarity', 0.0)
+                                item['final_score'] = scoring_info.get('combined_score', 0.0)
+                                item['index_coverage'] = scoring_info.get('source', 'unknown')
                             
                             # Apply model exclusion if needed
                             if exclude_model and item.get('MODEL_COD') == exclude_model:
@@ -257,6 +280,16 @@ class OptimizedBatchProcessor:
                         'Similar_SKU': similar_item.get('SKU_COD', ''),
                         'Similarity_Score': round(1 - similar_item.get('similarity_score', 0), 3)
                     }
+                    
+                    # Add scoring details if dual engine was used
+                    if dual_engine_enabled and 'gme_score' in similar_item:
+                        result_row.update({
+                            'GME_Score': round(similar_item.get('gme_score', 0), 3),
+                            'Technical_Score': round(similar_item.get('technical_score', 0), 3),
+                            'Final_Score': round(similar_item.get('final_score', 0), 3),
+                            'Score_Formula': f"{main_weight:.0%}×GME + {measurement_weight:.0%}×Technical",
+                            'Index_Coverage': similar_item.get('index_coverage', 'unknown')
+                        })
                     
                     # Add ALL columns from source item (prefixed with Source_)
                     for col, value in group_data['source_item'].items():
@@ -340,23 +373,32 @@ class OptimizedBatchProcessor:
         self.optimized_search.clear_cache()
         logger.info("🧹 Filter cache cleared")
     
-    def _batch_dual_index_search(self, queries: List[Tuple], top_k: int, query_metadata: Dict) -> Dict[str, List[Tuple[float, int]]]:
+    def _batch_dual_index_search(self, queries: List[Tuple], top_k: int, query_metadata: Dict, 
+                                main_weight: float = 0.7, measurement_weight: float = 0.3,
+                                search_mode: str = "global") -> Dict[str, List[Tuple[float, int, Dict]]]:
         """
-        Perform batch dual index search using pre-computed embeddings
+        Perform TRUE dual index search with weighted scoring
         
         Args:
             queries: List of (query_id, embedding, filters) tuples
             top_k: Number of results per query
             query_metadata: Dict mapping query_id to metadata including filename_root
+            main_weight: Weight for GME similarity (default 0.7)
+            measurement_weight: Weight for technical similarity (default 0.3)
             
         Returns:
-            Dict mapping query_id to list of (distance, embedding_idx) tuples
+            Dict mapping query_id to list of (distance, embedding_idx, scoring_info) tuples
         """
         from dual_index_data_loader import dual_index_loader
         import numpy as np
         
-        logger.info("🔍 Performing dual index search with pre-computed embeddings...")
+        logger.info("🔍 Performing TRUE dual index search with weighted scoring...")
         logger.info(f"📊 Processing {len(queries)} queries")
+        logger.info(f"⚖️ Formula: {main_weight:.1%} × GME + {measurement_weight:.1%} × Technical")
+        logger.info(f"🔍 Search mode: {search_mode}")
+        
+        # Set weights in dual loader
+        dual_index_loader.set_scoring_weights(main_weight, measurement_weight)
         
         results = {}
         
@@ -366,95 +408,104 @@ class OptimizedBatchProcessor:
                 # and search for the corresponding measurement embedding in the dual index system
                 
                 # Debug: Log filters being applied
-                logger.info(f"🔍 Debug [{query_id}]: Applying filters {filters}")
+                logger.debug(f"🔍 Debug [{query_id}]: Applying filters {filters}")
                 
-                # 1. Search in GME index (main index) WITH FILTERS
-                main_distances, main_indices = dual_index_loader.search_main_index(gme_embedding, top_k, filters)
+                if search_mode == "global":
+                    # Mode 1: Global Search - Search all products with FAISS, then apply filters
+                    # Search WITHOUT filters first to get global best matches
+                    main_distances, main_indices = dual_index_loader.search_main_index(
+                        gme_embedding, top_k * 2, filters=None  # No filters for global search
+                    )
+                else:
+                    # Mode 2: Filtered Search - Apply filters first, then search within subset
+                    # Search WITH filters to get best matches within filtered subset
+                    main_distances, main_indices = dual_index_loader.search_main_index(
+                        gme_embedding, top_k * 2, filters
+                    )
                 
-                # 2. Measurement index limitation: IndexIVFFlat doesn't support reconstruction
-                # For batch search, we'll use a practical workaround approach
+                # 2. Get measurement embedding for this query
                 filename_root = query_metadata[query_id]['filename_root']
-                normalized_path = f"db_pictures_512/{filename_root}.jpg"
+                measurement_embedding = dual_index_loader.get_measurement_embedding_by_filename(filename_root)
                 
-                # Check if this query exists in measurement index
-                query_in_measurement = False
-                if "product_mapping" in dual_index_loader.measurement_metadata:
-                    for idx_str, path in dual_index_loader.measurement_metadata["product_mapping"].items():
-                        if path == normalized_path:
-                            query_in_measurement = True
-                            break
+                if measurement_embedding is not None:
+                    # 3. Search measurement index (no filters supported)
+                    meas_distances, meas_indices = dual_index_loader.search_measurement_index(
+                        measurement_embedding, top_k * 2
+                    )
+                    logger.debug(f"Query {filename_root}: Found measurement embedding, searching both indexes")
+                else:
+                    # No measurement embedding available
+                    meas_distances = np.array([])
+                    meas_indices = np.array([])
+                    logger.debug(f"Query {filename_root}: No measurement embedding, using GME only")
                 
-                # For measurement contribution in batch search:
-                # We'll modify the main results to boost products that exist in both indexes
-                measurement_distances = np.array([])
-                measurement_indices = np.array([])
-                
-                if query_in_measurement:
-                    # Take the main search results and check which ones also exist in measurement index
-                    # This gives us products that are similar in visual terms AND have measurement data
-                    boosted_results = []
-                    
-                    for i, main_idx in enumerate(main_indices):
-                        main_distance = main_distances[i]
-                        
-                        # Check if this result also exists in measurement index (overlapping products)
-                        if main_idx in dual_index_loader.measurement_to_main_mapping.values():
-                            # This product exists in both indexes - give it a boost
-                            boosted_distance = main_distance * 0.7  # Boost by reducing distance
-                            boosted_results.append((boosted_distance, main_idx, True))  # True = in both indexes
-                        else:
-                            # This product only exists in main index
-                            boosted_results.append((main_distance, main_idx, False))  # False = main only
-                    
-                    # Create measurement results from the boosted main results that exist in both indexes
-                    measurement_candidates = [(dist, idx) for dist, idx, in_both in boosted_results if in_both]
-                    
-                    if measurement_candidates:
-                        # Sort by boosted distance and take top results
-                        measurement_candidates.sort(key=lambda x: x[0])
-                        measurement_candidates = measurement_candidates[:min(top_k, len(measurement_candidates))]
-                        
-                        measurement_distances = np.array([dist for dist, _ in measurement_candidates])
-                        measurement_indices = np.array([idx for _, idx in measurement_candidates])
-                        
-                        # Convert main indices to measurement indices for proper combination
-                        measurement_indices_converted = []
-                        for main_idx in measurement_indices:
-                            # Find the corresponding measurement index
-                            for meas_idx, mapped_main_idx in dual_index_loader.measurement_to_main_mapping.items():
-                                if mapped_main_idx == main_idx:
-                                    measurement_indices_converted.append(meas_idx)
-                                    break
-                        
-                        if measurement_indices_converted:
-                            measurement_indices = np.array(measurement_indices_converted)
-                
-                # Debug logging for first few queries
-                if len(results) < 3:  # Only log first 3 queries to avoid spam
-                    if query_in_measurement:
-                        measurement_status = f"✅ Query in measurement index, found {len(measurement_indices)} overlapping results"
-                    else:
-                        measurement_status = "❌ Query not in measurement index"
-                    logger.info(f"🔍 Debug [{query_id}]: {filename_root} -> {measurement_status}")
-                
-                # 4. Combine results using dual index scoring
+                # 4. Use the EXISTING combine_search_results for proper weighted scoring!
                 combined_results = dual_index_loader.combine_search_results(
                     main_distances, main_indices,
-                    measurement_distances, measurement_indices,
+                    meas_distances, meas_indices,
                     top_k
                 )
                 
-                # Convert to the format expected by the batch processor
-                # (distance, embedding_idx) tuples - use main index embedding indices
+                # 5. Convert combined results back to the format expected by batch processor
                 query_results = []
+                
+                # For global mode, we need to filter the results after scoring
+                if search_mode == "global" and filters:
+                    # Apply filters post-search for global mode
+                    filtered_results = []
+                    for result in combined_results:
+                        # Check if result matches filters
+                        result_filename = result.get('filename_root', '')
+                        if result_filename:
+                            # Find matching rows in dataframe
+                            matching_rows = self.data_loader.df[
+                                self.data_loader.df['filename_root'] == result_filename
+                            ]
+                            
+                            # Check if any row matches all filters
+                            matches_filters = False
+                            for _, row in matching_rows.iterrows():
+                                all_match = True
+                                for col, filter_val in filters.items():
+                                    if col in row:
+                                        if isinstance(filter_val, list):
+                                            if row[col] not in filter_val:
+                                                all_match = False
+                                                break
+                                        elif row[col] != filter_val:
+                                            all_match = False
+                                            break
+                                if all_match:
+                                    matches_filters = True
+                                    break
+                            
+                            if matches_filters:
+                                filtered_results.append(result)
+                    
+                    combined_results = filtered_results
+                    logger.info(f"Global mode post-filtering: {len(combined_results)} results after filtering")
+                
                 for result in combined_results:
-                    # Get the main index embedding index for this result
-                    filename_path = result.get('filename_root', '')
-                    if filename_path and filename_path in self.data_loader.filename_to_idx:
-                        embedding_idx = self.data_loader.filename_to_idx[filename_path]
-                        # Convert similarity score back to distance (1 - similarity)
-                        distance = 1.0 - result.get('similarity_score', 0.0)
-                        query_results.append((distance, embedding_idx))
+                    # Get the filename_root from the result
+                    result_filename = result.get('filename_root', '')
+                    if result_filename and result_filename in self.data_loader.filename_to_idx:
+                        embedding_idx = self.data_loader.filename_to_idx[result_filename]
+                        # Use the combined similarity score (already weighted!)
+                        similarity_score = result.get('similarity_score', 0.0)
+                        # Convert similarity to distance for consistency
+                        distance = 1.0 - similarity_score
+                        
+                        # Store additional scoring info in the result
+                        query_results.append((
+                            distance, 
+                            embedding_idx,
+                            {
+                                'main_similarity': result.get('main_similarity', 0.0),
+                                'measurement_similarity': result.get('measurement_similarity', 0.0),
+                                'combined_score': similarity_score,
+                                'source': result.get('score_source', 'unknown')
+                            }
+                        ))
                 
                 results[query_id] = query_results
                 
@@ -463,5 +514,5 @@ class OptimizedBatchProcessor:
                 # Fallback to empty results
                 results[query_id] = []
         
-        logger.info(f"✅ Dual index search completed for {len(queries)} queries")
+        logger.info(f"✅ True dual index search completed for {len(queries)} queries")
         return results 

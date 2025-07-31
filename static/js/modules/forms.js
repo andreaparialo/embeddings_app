@@ -259,7 +259,25 @@ export class FormManager {
         formData.append('allowed_status_codes', JSON.stringify(selectedStatusCodes));
         
         formData.append('group_unisex', document.getElementById('group-unisex').checked);
-        formData.append('dual_engine', document.getElementById('dual-engine').checked);
+        
+        // Check if dual engine is enabled
+        const dualEngineEnabled = document.getElementById('dual-engine').checked;
+        formData.append('dual_engine', dualEngineEnabled);
+        
+        // Add dual engine parameters if enabled
+        if (dualEngineEnabled) {
+            // Get weight values
+            const mainWeight = parseFloat(document.getElementById('batch-main-weight')?.value || 0.7);
+            const measurementWeight = parseFloat(document.getElementById('batch-measurement-weight')?.value || 0.3);
+            formData.append('main_weight', mainWeight);
+            formData.append('measurement_weight', measurementWeight);
+            
+            // Get search mode (global or filtered)
+            const searchMode = document.querySelector('input[name="search_mode"]:checked')?.value || 'global';
+            formData.append('search_mode', searchMode);
+            
+            console.log(`🔍 Batch dual-index search: mode=${searchMode}, weights: Visual=${mainWeight}, Technical=${measurementWeight}`);
+        }
         
         const filterOnlyMode = document.getElementById('filter-only-mode').checked;
         const viewerMode = document.getElementById('viewer-mode').checked;

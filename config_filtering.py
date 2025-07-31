@@ -20,13 +20,12 @@ ENABLE_BASELINE_STATUS_FILTER = True
 # RELEASE DATE BASELINE FILTER
 # Exclude specific releases from the searchable index
 # Years to exclude (will exclude any STARTSKU_DATE containing these years)
-BASELINE_EXCLUDE_YEARS = [
-    2026,  # Exclude all 2026 releases
+BASELINE_EXCLUDE_YEARS = [  # Exclude all 2026 releases
 ]
 
 # Specific dates to exclude (format: YYYY-MM-DD)
-BASELINE_EXCLUDE_DATES = [
-    '2025-08-01',  # Exclude specific August 2025 release
+BASELINE_EXCLUDE_DATES = [  # Exclude specific August 2025 release
+'2026-08-01'
 ]
 ENABLE_BASELINE_DATE_FILTER = True
 
