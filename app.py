@@ -341,25 +341,27 @@ async def modern_interface(request: Request):
         "current_index_id": data_loader.current_index_id
     })
 
-@app.get("/legacy", response_class=HTMLResponse)
-async def legacy_interface(request: Request):
-    """Legacy interface (for backward compatibility)"""
-    filter_options = search_engine.get_filter_options() if INITIALIZATION_STATUS["initialized"] else {}
-    checkpoints = data_loader.get_available_checkpoints() if INITIALIZATION_STATUS["initialized"] else []
-    
-    # Get available indexes
-    indexes = data_loader.get_available_indexes()
-    current_index = data_loader.get_current_index_info()
-    
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "initialization_status": INITIALIZATION_STATUS,
-        "filter_options": filter_options,
-        "checkpoints": checkpoints,
-        "indexes": indexes,
-        "current_index": current_index,
-        "current_index_id": data_loader.current_index_id
-    })
+# Legacy route commented out to prevent Bootstrap conflicts
+# Uncomment if needed for backward compatibility
+# @app.get("/legacy", response_class=HTMLResponse)
+# async def legacy_interface(request: Request):
+#     """Legacy interface (for backward compatibility)"""
+#     filter_options = search_engine.get_filter_options() if INITIALIZATION_STATUS["initialized"] else {}
+#     checkpoints = data_loader.get_available_checkpoints() if INITIALIZATION_STATUS["initialized"] else []
+#     
+#     # Get available indexes
+#     indexes = data_loader.get_available_indexes()
+#     current_index = data_loader.get_current_index_info()
+#     
+#     return templates.TemplateResponse("index.html", {
+#         "request": request,
+#         "initialization_status": INITIALIZATION_STATUS,
+#         "filter_options": filter_options,
+#         "checkpoints": checkpoints,
+#         "indexes": indexes,
+#         "current_index": current_index,
+#         "current_index_id": data_loader.current_index_id
+#     })
 
 @app.get("/api/status")
 async def get_status():
@@ -1824,14 +1826,15 @@ async def upload_excel_results(file: UploadFile = File(...)):
             content={"error": f"Failed to process Excel file: {str(e)}"}
         )
 
-@app.get("/debug_navigation.html", response_class=HTMLResponse)
-async def debug_navigation():
-    """Debug route to test navigation module loading"""
-    try:
-        with open("debug_navigation.html", "r") as f:
-            return HTMLResponse(content=f.read())
-    except FileNotFoundError:
-        return HTMLResponse(content="<h1>Debug file not found</h1>", status_code=404)
+# Debug route removed - file no longer exists
+# @app.get("/debug_navigation.html", response_class=HTMLResponse)
+# async def debug_navigation():
+#     """Debug route to test navigation module loading"""
+#     try:
+#         with open("debug_navigation.html", "r") as f:
+#             return HTMLResponse(content=f.read())
+#     except FileNotFoundError:
+#         return HTMLResponse(content="<h1>Debug file not found</h1>", status_code=404)
 
 if __name__ == "__main__":
     import uvicorn

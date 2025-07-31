@@ -56,18 +56,30 @@ export class NavigationManager {
         // First, clear all results to prevent overlap
         this.clearAllResults();
         
-        // Hide all view containers
+        // Force immediate hiding of all views
         this.views.forEach(view => {
             view.classList.remove('active');
-            // Reset any inline styles
-            view.style.display = '';
+            // Force immediate hide to prevent flash
+            view.style.display = 'none';
+            view.style.opacity = '0';
+            view.style.visibility = 'hidden';
         });
         
-        // Show selected view
-        const targetView = document.getElementById(viewId + '-view');
-        if (targetView) {
-            targetView.classList.add('active');
-        }
+        // Small delay to ensure previous view is fully hidden
+        setTimeout(() => {
+            // Reset display for CSS transitions to work
+            this.views.forEach(view => {
+                view.style.display = '';
+            });
+            
+            // Show selected view
+            const targetView = document.getElementById(viewId + '-view');
+            if (targetView) {
+                targetView.classList.add('active');
+                // Force reflow to ensure transition works
+                targetView.offsetHeight;
+            }
+        }, 50);
         
         // Update navigation active state
         this.navItems.forEach(item => {

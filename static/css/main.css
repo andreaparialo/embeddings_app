@@ -118,6 +118,7 @@ h6 { font-size: 1rem; }
     flex: 1;
     overflow-y: auto;
     position: relative;
+    isolation: isolate; /* Create new stacking context */
 }
 
 /* ================================================
@@ -390,15 +391,22 @@ h6 { font-size: 1rem; }
 .view-container {
     display: none;
     padding: 2rem;
+    padding-top: 5.5rem; /* Account for sticky header (3rem padding + ~2rem title + 0.5rem gap) */
     max-width: 1400px;
     margin: 0 auto;
-    animation: fadeIn 0.3s ease;
     position: relative;
     width: 100%;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease, visibility 0.3s ease;
+    z-index: 1;
 }
 
 .view-container.active {
     display: block;
+    opacity: 1;
+    visibility: visible;
+    animation: fadeIn 0.3s ease;
 }
 
 /* Ensure results containers are properly contained within their view */
@@ -599,6 +607,15 @@ h6 { font-size: 1rem; }
     text-align: center;
     padding: 4rem;
     display: none;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 2000;
+    background: rgba(28, 32, 40, 0.95);
+    border-radius: var(--radius);
+    min-width: 300px;
+    box-shadow: var(--shadow);
 }
 
 .loading-container.active {
