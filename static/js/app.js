@@ -34,26 +34,63 @@ class VisionSearchApp {
     init() {
         console.log('🚀 Initializing Vision Search App');
         
-        // Initialize components first
-        this.sidebar.init();
-        
-        // Initialize all modules
-        this.navigation.init();
-        this.filters.init();
-        this.fileUpload.init();
-        this.forms.init();
-        console.log('🔥 Initializing batch viewer...');
-        console.log('🔥 BatchViewer instance:', this.batchViewer);
-        this.batchViewer.init();
-        console.log('✅ Batch viewer initialized');
-        
-        // Set initial status
-        this.updateSystemStatus();
-        
-        // Attach global event listeners
-        this.attachGlobalEvents();
-        
-        console.log('✅ Vision Search App initialized');
+        try {
+            // Initialize components first
+            this.sidebar.init();
+            console.log('✅ Sidebar initialized');
+            
+            // Initialize all modules with error handling
+            try {
+                this.navigation.init();
+                console.log('✅ Navigation initialized');
+            } catch (e) {
+                console.error('❌ Navigation initialization failed:', e);
+            }
+            
+            try {
+                this.filters.init();
+                console.log('✅ Filters initialized');
+            } catch (e) {
+                console.error('❌ Filters initialization failed:', e);
+            }
+            
+            try {
+                this.fileUpload.init();
+                console.log('✅ File upload initialized');
+            } catch (e) {
+                console.error('❌ File upload initialization failed:', e);
+            }
+            
+            try {
+                this.forms.init();
+                console.log('✅ Forms initialized');
+            } catch (e) {
+                console.error('❌ Forms initialization failed:', e);
+            }
+            
+            try {
+                console.log('🔥 Initializing batch viewer...');
+                console.log('🔥 BatchViewer instance:', this.batchViewer);
+                this.batchViewer.init();
+                console.log('✅ Batch viewer initialized');
+            } catch (e) {
+                console.error('❌ Batch viewer initialization failed:', e);
+            }
+            
+            // Set initial status
+            this.updateSystemStatus();
+            
+            // Attach global event listeners
+            this.attachGlobalEvents();
+            
+            console.log('✅ Vision Search App initialized');
+        } catch (error) {
+            console.error('❌ Critical error during app initialization:', error);
+            // Try to at least show the navigation
+            if (this.navigation) {
+                this.navigation.showView('image-search');
+            }
+        }
     }
 
     attachGlobalEvents() {

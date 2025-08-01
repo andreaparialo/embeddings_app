@@ -159,7 +159,12 @@ class OptimizedBatchProcessor:
         # Process results
         all_results = []
         
+        logger.info(f"Dual search returned: {list(search_results.keys())} keys")
+        logger.info(f"Query metadata has: {list(query_metadata.keys())} keys")
+        logger.info(f"About to process {len(search_results)} search result groups")
+        
         for query_id, result_indices in search_results.items():
+            logger.info(f"Processing query_id: {query_id}, type: {type(result_indices)}, len: {len(result_indices) if result_indices else 0}")
             metadata = query_metadata[query_id]
             filename_root = metadata['filename_root']
             group_data = metadata['group_data']
@@ -172,25 +177,79 @@ class OptimizedBatchProcessor:
             items_before_postfilter = 0
             items_filtered_out = 0
             
+            logger.info(f"Processing {len(result_indices)} result indices for {filename_root}")
+            
             # Get more results initially to account for post-filtering
-            for item in result_indices:
+            for i, item in enumerate(result_indices):
+                if i < 3:  # Only log first 3 items to avoid spam
+                    logger.info(f"Processing item {i}: {type(item)}, content: {item}")
                 if len(item) == 3:  # New format with scoring details
                     distance, embedding_idx, scoring_info = item
                 else:  # Legacy format
                     distance, embedding_idx = item
                     scoring_info = None
-                if embedding_idx >= 0:
-                    # Convert embedding index back to filename_root
-                    if embedding_idx in self.data_loader.idx_to_filename_root:
-                        similar_filename_root = self.data_loader.idx_to_filename_root[embedding_idx]
-                        
-                        # Find all rows in DataFrame with this filename_root
-                        matching_rows = self.data_loader.df[
-                            self.data_loader.df['filename_root'] == similar_filename_root
-                        ]
-                        
-                        # Process each matching row (multiple SKUs can have same filename_root)
+                if embedding_idx == -1 and scoring_info and 'filename_root' in scoring_info:
+                    # Handle measurement-only products
+                    similar_filename_root = scoring_info['filename_root']
+                    
+                    # Find rows in DataFrame (might be empty for measurement-only)
+                    matching_rows = self.data_loader.df[
+                        self.data_loader.df['filename_root'] == similar_filename_root
+                    ]
+                    
+                    if matching_rows.empty:
+                        # Create synthetic product info
+                        item = {
+                            'filename_root': similar_filename_root,
+                            'SKU_COD': f'MEAS_{similar_filename_root}',
+                            'similarity_score': distance
+                        }
+                        # Add scoring details
+                        if scoring_info:
+                            item['gme_score'] = scoring_info.get('main_similarity', 0.0)
+                            item['technical_score'] = scoring_info.get('measurement_similarity', 0.0)
+                            item['final_score'] = scoring_info.get('combined_score', 0.0)
+                            item['search_source'] = scoring_info.get('source', 'unknown')
+                            item['index_membership'] = scoring_info.get('index_membership', 'unknown')
+                        similar_items.append(item)
+                    else:
+                        # Process normally if found in dataframe
                         for _, row in matching_rows.iterrows():
+                            item = row.to_dict()
+                            item['similarity_score'] = distance
+                            if scoring_info:
+                                item['gme_score'] = scoring_info.get('main_similarity', 0.0)
+                                item['technical_score'] = scoring_info.get('measurement_similarity', 0.0)
+                                item['final_score'] = scoring_info.get('combined_score', 0.0)
+                                item['search_source'] = scoring_info.get('source', 'unknown')
+                                item['index_membership'] = scoring_info.get('index_membership', 'unknown')
+                            similar_items.append(item)
+                elif embedding_idx >= 0:
+                    # First try to get filename_root from scoring_info (more reliable)
+                    if scoring_info and 'filename_root' in scoring_info:
+                        similar_filename_root = scoring_info['filename_root']
+                    elif embedding_idx in self.data_loader.idx_to_filename_root:
+                        # Fallback to index lookup if no scoring info
+                        similar_filename_root = self.data_loader.idx_to_filename_root[embedding_idx]
+                    else:
+                        logger.warning(f"Embedding index {embedding_idx} not found in idx_to_filename_root mapping and no filename_root in scoring_info")
+                        continue
+                    
+                    # Find all rows in DataFrame with this filename_root
+                    matching_rows = self.data_loader.df[
+                        self.data_loader.df['filename_root'] == similar_filename_root
+                    ]
+                    
+                    if i < 3:  # Debug first few items
+                        logger.info(f"Looking for filename_root '{similar_filename_root}' in DataFrame, found {len(matching_rows)} rows")
+                    
+                    if matching_rows.empty:
+                        # Product exists in index but not in DataFrame - skip it
+                        logger.warning(f"Skipping '{similar_filename_root}' - exists in index but not in DataFrame")
+                        continue
+                    
+                    # Process each matching row (multiple SKUs can have same filename_root)
+                    for _, row in matching_rows.iterrows():
                             item = row.to_dict()
                             item['similarity_score'] = distance
                             
@@ -199,7 +258,8 @@ class OptimizedBatchProcessor:
                                 item['gme_score'] = scoring_info.get('main_similarity', 0.0)
                                 item['technical_score'] = scoring_info.get('measurement_similarity', 0.0)
                                 item['final_score'] = scoring_info.get('combined_score', 0.0)
-                                item['index_coverage'] = scoring_info.get('source', 'unknown')
+                                item['search_source'] = scoring_info.get('source', 'unknown')
+                                item['index_membership'] = scoring_info.get('index_membership', 'unknown')
                             
                             # Apply model exclusion if needed
                             if exclude_model and item.get('MODEL_COD') == exclude_model:
@@ -258,8 +318,6 @@ class OptimizedBatchProcessor:
                             
                             if len(similar_items) >= max_results_per_sku:
                                 break
-                    else:
-                        logger.warning(f"Embedding index {embedding_idx} not found in idx_to_filename_root mapping")
                 
                 if len(similar_items) >= max_results_per_sku:
                     break
@@ -288,7 +346,8 @@ class OptimizedBatchProcessor:
                             'Technical_Score': round(similar_item.get('technical_score', 0), 3),
                             'Final_Score': round(similar_item.get('final_score', 0), 3),
                             'Score_Formula': f"{main_weight:.0%}×GME + {measurement_weight:.0%}×Technical",
-                            'Index_Coverage': similar_item.get('index_coverage', 'unknown')
+                            'Search_Source': similar_item.get('search_source', 'unknown'),
+                            'Index_Membership': similar_item.get('index_membership', 'unknown')
                         })
                     
                     # Add ALL columns from source item (prefixed with Source_)
@@ -395,9 +454,10 @@ class OptimizedBatchProcessor:
             Dict mapping query_id to list of (distance, embedding_idx, scoring_info) tuples
         """
         from dual_index_data_loader import dual_index_loader
+        from dual_index_search_all import search_all_filtered_products
         import numpy as np
         
-        logger.info("🔍 Performing TRUE dual index search with weighted scoring...")
+        logger.info("🔍 Performing dual index search for ALL filtered products...")
         logger.info(f"📊 Processing {len(queries)} queries")
         logger.info(f"⚖️ Formula: {main_weight:.1%} × GME + {measurement_weight:.1%} × Technical")
         logger.info(f"🔍 Search mode: {search_mode}")
@@ -409,118 +469,104 @@ class OptimizedBatchProcessor:
         
         for query_id, gme_embedding, filters in queries:
             try:
-                # For batch search, we use the GME embedding from the query (filename_root's embedding)
-                # and search for the corresponding measurement embedding in the dual index system
-                
-                # Debug: Log filters being applied
-                logger.debug(f"🔍 Debug [{query_id}]: Search mode={search_mode}, Filters={filters}")
-                
-                if search_mode == "global":
-                    # Mode 1: Global Search - Search all products with FAISS, then apply filters
-                    # Search WITHOUT filters first to get global best matches
-                    main_distances, main_indices = dual_index_loader.search_main_index(
-                        gme_embedding, top_k * 2, filters=None  # No filters for global search
-                    )
-                else:
-                    # Mode 2: Filtered Search - Apply filters first, then search within subset
-                    # Search WITH filters to get best matches within filtered subset
-                    main_distances, main_indices = dual_index_loader.search_main_index(
-                        gme_embedding, top_k * 2, filters
-                    )
-                
-                # 2. Get measurement embedding for this query
+                # Get embeddings
                 filename_root = query_metadata[query_id]['filename_root']
                 measurement_embedding = dual_index_loader.get_measurement_embedding_by_filename(filename_root)
                 
-                if measurement_embedding is not None:
-                    # 3. Search measurement index with appropriate filtering based on mode
-                    if search_mode == "global":
-                        # Mode 1: Global Search - No filters during search
-                        meas_distances, meas_indices = dual_index_loader.search_measurement_index(
-                            measurement_embedding, top_k * 2
-                        )
-                    else:
-                        # Mode 2: Filtered Search - Apply same filters as main index
-                        meas_distances, meas_indices = dual_index_loader.search_measurement_index_with_filters(
-                            measurement_embedding, top_k * 2, filters
-                        )
-                    logger.debug(f"Query {filename_root}: Found measurement embedding, searching both indexes")
-                else:
-                    # No measurement embedding available
-                    meas_distances = np.array([])
-                    meas_indices = np.array([])
-                    logger.debug(f"Query {filename_root}: No measurement embedding, using GME only")
+                logger.debug(f"🔍 Debug [{query_id}]: Search mode={search_mode}, Filters={filters}")
                 
-                # 4. Use the EXISTING combine_search_results for proper weighted scoring!
-                combined_results = dual_index_loader.combine_search_results(
-                    main_distances, main_indices,
-                    meas_distances, meas_indices,
-                    top_k
+                # Use the new search function that gets ALL products matching filters
+                all_results = search_all_filtered_products(
+                    gme_embedding, 
+                    measurement_embedding,
+                    filters,
+                    search_mode
                 )
                 
-                # 5. Convert combined results back to the format expected by batch processor
+                logger.info(f"📊 Query {filename_root}: Found {len(all_results)} total products")
+                
+                # Get the product info from the query to exclude same model if needed
+                exclude_model = query_metadata[query_id].get('exclude_model', None)
+                
+                # Filter out same model if needed
+                if exclude_model:
+                    all_results = [r for r in all_results if not (
+                        r['filename_root'] in self.data_loader.filename_to_idx and
+                        self.data_loader.df[self.data_loader.df['filename_root'] == r['filename_root']]['MODEL_COD'].iloc[0] == exclude_model
+                    )]
+                
+                # Take only top_k results
+                combined_results = all_results[:top_k]
+                
+                # Convert results to the format expected by batch processor
                 query_results = []
                 
-                # For global mode, we need to filter the results after scoring
+                # For global mode, apply post-filtering to the already sorted results
                 if search_mode == "global" and filters:
-                    # Apply filters post-search for global mode
                     filtered_results = []
+                    
                     for result in combined_results:
-                        # Check if result matches filters
                         result_filename = result.get('filename_root', '')
-                        if result_filename:
-                            # Find matching rows in dataframe
-                            matching_rows = self.data_loader.df[
-                                self.data_loader.df['filename_root'] == result_filename
-                            ]
-                            
-                            # Check if any row matches all filters
-                            matches_filters = False
-                            for _, row in matching_rows.iterrows():
-                                all_match = True
-                                for col, filter_val in filters.items():
-                                    if col in row:
-                                        if isinstance(filter_val, list):
-                                            if row[col] not in filter_val:
-                                                all_match = False
-                                                break
-                                        elif row[col] != filter_val:
+                        
+                        # Check if product exists in dataframe
+                        matching_rows = self.data_loader.df[
+                            self.data_loader.df['filename_root'] == result_filename
+                        ]
+                        
+                        if matching_rows.empty:
+                            # Keep measurement-only products - they can't be filtered by metadata
+                            filtered_results.append(result)
+                            continue
+                        
+                        # Check if product matches all filters
+                        matches_filters = False
+                        for _, row in matching_rows.iterrows():
+                            all_match = True
+                            for col, filter_val in filters.items():
+                                if col in row:
+                                    if isinstance(filter_val, list):
+                                        if row[col] not in filter_val:
                                             all_match = False
                                             break
-                                if all_match:
-                                    matches_filters = True
-                                    break
-                            
-                            if matches_filters:
-                                filtered_results.append(result)
+                                    elif row[col] != filter_val:
+                                        all_match = False
+                                        break
+                            if all_match:
+                                matches_filters = True
+                                break
+                        
+                        if matches_filters:
+                            filtered_results.append(result)
                     
-                    original_count = len(combined_results)
+                    logger.info(f"🎯 Global mode post-filtering: {len(combined_results)} → {len(filtered_results)} results")
                     combined_results = filtered_results
-                    logger.info(f"🎯 Global mode post-filtering for {query_id}: {original_count} → {len(filtered_results)} results after filtering")
                 
+                # Convert to batch processor format
                 for result in combined_results:
-                    # Get the filename_root from the result
                     result_filename = result.get('filename_root', '')
+                    
+                    # For products in main index, use the embedding index
                     if result_filename and result_filename in self.data_loader.filename_to_idx:
                         embedding_idx = self.data_loader.filename_to_idx[result_filename]
-                        # Use the combined similarity score (already weighted!)
-                        similarity_score = result.get('similarity_score', 0.0)
-                        # Convert similarity to distance for consistency
-                        distance = 1.0 - similarity_score
-                        
-                        # Store additional scoring info in the result
-                        query_results.append((
-                            distance, 
-                            embedding_idx,
-                            {
-                                'main_similarity': result.get('main_similarity', 0.0),
-                                'measurement_similarity': result.get('measurement_similarity', 0.0),
-                                'combined_score': similarity_score,
-                                'source': result.get('score_source', 'unknown')
-                            }
-                        ))
+                    else:
+                        # For measurement-only products, use a synthetic index
+                        embedding_idx = -1  # Marker for measurement-only
+                    
+                    query_results.append((
+                        1.0 - result.get('combined_score', 0.0),  # Convert score to distance
+                        embedding_idx,
+                        {
+                            'main_similarity': result.get('main_similarity', 0.0),
+                            'measurement_similarity': result.get('measurement_similarity', 0.0),
+                            'combined_score': result.get('combined_score', 0.0),
+                            'source': result.get('score_source', 'unknown'),
+                            'index_membership': result.get('index_membership', 'unknown'),
+                            'filename_root': result_filename  # Store filename for later use
+                        }
+                    ))
                 
                 results[query_id] = query_results
+                logger.info(f"📊 Query {query_id} produced {len(query_results)} results for batch processor")
                 
             except Exception as e:
                 logger.warning(f"Error in dual index search for {query_id}: {e}")

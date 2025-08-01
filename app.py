@@ -1297,11 +1297,16 @@ async def enhanced_batch_search(
                         # Initialize batch processor if needed
             from batch_processor import BatchImageProcessor
             from batch_processor_optimized import OptimizedBatchProcessor
+            from batch_processor_parallel import ParallelBatchProcessor
             
-            # Use optimized processor with pre-filtering for better performance
-            use_optimized = True  # Can make this configurable later
+            # Use parallel processor for better performance with filtered searches
+            use_parallel = True  # Can make this configurable later
+            use_optimized = True  # Fallback option
             
-            if use_optimized:
+            if use_parallel:
+                logger.info("⚡ Using PARALLEL batch processor with multiprocessing")
+                batch_proc = ParallelBatchProcessor(search_engine, data_loader, gme_model)
+            elif use_optimized:
                 logger.info("🚀 Using OPTIMIZED batch processor with pre-filtering")
                 batch_proc = OptimizedBatchProcessor(search_engine, data_loader, gme_model)
             else:
@@ -1309,7 +1314,7 @@ async def enhanced_batch_search(
                 batch_proc = BatchImageProcessor(search_engine, data_loader, gme_model)
             
             # Process in parallel
-            if use_optimized and hasattr(batch_proc, 'process_image_groups_with_prefilter'):
+            if hasattr(batch_proc, 'process_image_groups_with_prefilter'):
                 all_results = batch_proc.process_image_groups_with_prefilter(
                     sku_groups, matching_cols, max_results_per_sku,
                     exclude_same_model, allowed_statuses, group_unisex,

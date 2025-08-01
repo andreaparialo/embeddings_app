@@ -41,9 +41,15 @@ export class FilterManager {
         
         container.innerHTML = '';
         
+        // Check if filterOptions is empty or not an object
+        if (!this.filterOptions || Object.keys(this.filterOptions).length === 0) {
+            console.log('No filter options available');
+            return;
+        }
+        
         // Sort filters to put main filters first
         const sortedFilters = Object.entries(this.filterOptions)
-            .filter(([_, options]) => options.length <= 500)
+            .filter(([_, options]) => options && Array.isArray(options) && options.length <= 500)
             .sort(([a], [b]) => {
                 const aIndex = this.mainFilters.indexOf(a);
                 const bIndex = this.mainFilters.indexOf(b);

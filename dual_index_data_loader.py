@@ -37,6 +37,10 @@ class DualIndexDataLoader:
         # Combined product database
         self.df = None
         
+        # Index membership tracking
+        self.main_filename_roots = set()  # All products in main index
+        self.measurement_filename_roots = set()  # All products in measurement index
+        
         # Index file paths
         self.main_index_path = "indexes/v11_1095_db_pictures_512_merged_final_20250703_125538.faiss"
         self.main_metadata_path = "indexes/v11_1095_db_pictures_512_merged_final_20250703_125538_metadata.json"
@@ -101,6 +105,12 @@ class DualIndexDataLoader:
             if not metadata_loaded:
                 logger.error("❌ Could not find main index metadata file")
                 return False
+            
+            # Build filename root set for main index
+            self.main_filename_roots = set()
+            for path in self.main_metadata['image_paths']:
+                filename_root = os.path.basename(path).replace('.jpg', '')
+                self.main_filename_roots.add(filename_root)
             
             logger.info(f"✅ Main index loaded: {self.main_index.ntotal} vectors, {self.main_index.d}d")
             return True
@@ -225,6 +235,12 @@ class DualIndexDataLoader:
                         self.measurement_to_main_mapping[idx] = main_idx
                         overlapping_count += 1
             
+            # Build filename root set for measurement index
+            self.measurement_filename_roots = set()
+            for info in self.measurement_path_mapping.values():
+                filename_root = os.path.basename(info['normalized']).replace('.jpg', '')
+                self.measurement_filename_roots.add(filename_root)
+            
             logger.info(f"✅ Measurement index loaded: {self.measurement_index.ntotal} vectors, {self.measurement_index.d}d")
             logger.info(f"📊 Path mapping: {overlapping_count} overlapping products found")
             
@@ -320,7 +336,7 @@ class DualIndexDataLoader:
         query_embedding = query_embedding.reshape(1, -1).astype(np.float32)
         
         # If no filters, use standard search
-        if not filters or not self.df:
+        if not filters or self.df is None:
             logger.info("🔍 Using raw measurement search (no filters)")
             distances, indices = self.measurement_index.search(query_embedding, top_k * 3)  # Get more results for filtering
             return distances[0], indices[0]
@@ -395,14 +411,13 @@ class DualIndexDataLoader:
         try:
             # Normalize distances to similarity scores (0-1 range)
             # Convert L2 distances to similarities: similarity = 1 / (1 + distance)
+            # This gives higher scores for smaller distances
             main_similarities = 1.0 / (1.0 + main_distances)
             measurement_similarities = 1.0 / (1.0 + measurement_distances)
             
-            # Normalize to 0-1 range
-            if len(main_similarities) > 1:
-                main_similarities = (main_similarities - np.min(main_similarities)) / (np.max(main_similarities) - np.min(main_similarities) + 1e-8)
-            if len(measurement_similarities) > 1:
-                measurement_similarities = (measurement_similarities - np.min(measurement_similarities)) / (np.max(measurement_similarities) - np.min(measurement_similarities) + 1e-8)
+            # No need for min-max normalization - the 1/(1+d) formula already gives us 0-1 range
+            # where distance=0 gives similarity=1.0 (perfect match)
+            # and large distances give similarities close to 0
             
             # Create combined results
             combined_results = {}
@@ -423,23 +438,31 @@ class DualIndexDataLoader:
                             main_sim * self.main_weight + 
                             default_meas_sim * self.measurement_weight
                         ),
-                        'source': 'main_only'
+                        'source': 'main_search'  # Found by main search
                     }
             
             # Add measurement index results
+            logger.debug(f"📏 Processing {len(measurement_indices)} measurement results")
+            logger.debug(f"📊 Measurement path mapping has {len(self.measurement_path_mapping)} entries")
+            
+            measurement_found = 0
+            both_indexes_count = 0
             for i, (meas_idx, meas_sim) in enumerate(zip(measurement_indices, measurement_similarities)):
                 if meas_idx in self.measurement_path_mapping:
+                    measurement_found += 1
                     normalized_path = self.measurement_path_mapping[meas_idx]['normalized']
                     
                     if normalized_path in combined_results:
                         # Product exists in both indexes - combine scores
+                        logger.debug(f"🎯 Found product in BOTH indexes: {normalized_path} (meas_idx={meas_idx})")
+                        both_indexes_count += 1
                         combined_results[normalized_path]['measurement_similarity'] = float(meas_sim)
                         combined_results[normalized_path]['measurement_rank'] = i + 1
                         combined_results[normalized_path]['combined_score'] = float(
                             combined_results[normalized_path]['main_similarity'] * self.main_weight +
                             meas_sim * self.measurement_weight
                         )
-                        combined_results[normalized_path]['source'] = 'both_indexes'
+                        combined_results[normalized_path]['source'] = 'both_searches'  # Found by both searches
                     else:
                         # Product only in measurement index
                         # Use a default main similarity to avoid unfair penalization
@@ -453,8 +476,13 @@ class DualIndexDataLoader:
                                 default_main_sim * self.main_weight +
                                 meas_sim * self.measurement_weight
                             ),
-                            'source': 'measurement_only'
+                            'source': 'measurement_search'  # Found by measurement search
                         }
+                else:
+                    logger.debug(f"⚠️ Measurement index {meas_idx} not found in path mapping")
+            
+            logger.debug(f"✅ Found {measurement_found}/{len(measurement_indices)} measurement results in path mapping")
+            logger.debug(f"🎯 Products in BOTH indexes: {both_indexes_count}")
             
             # Sort by combined score and limit to top_k
             sorted_results = sorted(combined_results.items(), 
@@ -463,6 +491,7 @@ class DualIndexDataLoader:
             
             # Convert to final format with product information
             final_results = []
+            synthetic_count = 0
             for image_path, scores in sorted_results:
                 # Get product info from main dataframe
                 filename_root = os.path.basename(image_path).replace('.jpg', '')
@@ -479,12 +508,48 @@ class DualIndexDataLoader:
                         'measurement_rank': scores['measurement_rank'],
                         'score_source': scores['source']
                     })
+                    # Add index membership
+                    if filename_root in self.main_filename_roots and filename_root in self.measurement_filename_roots:
+                        product_info['index_membership'] = 'both_indexes'
+                    elif filename_root in self.main_filename_roots:
+                        product_info['index_membership'] = 'main_only'
+                    else:
+                        product_info['index_membership'] = 'measurement_only'
+                    
                     final_results.append(product_info)
+                else:
+                    # Create synthetic product info for measurement-only products
+                    synthetic_count += 1
+                    product_info = {
+                        'filename_root': filename_root,
+                        'SKU_COD': f'MEAS_{filename_root}',  # Synthetic SKU
+                        'image_path': image_path,
+                        'similarity_score': scores['combined_score'],
+                        'main_similarity': scores['main_similarity'],
+                        'measurement_similarity': scores['measurement_similarity'],
+                        'main_rank': scores['main_rank'],
+                        'measurement_rank': scores['measurement_rank'],
+                        'score_source': scores['source'],
+                        'MD_SKU_STATUS_COD': 'MEASUREMENT_ONLY'  # Special status
+                    }
+                    # Add index membership
+                    if filename_root in self.main_filename_roots and filename_root in self.measurement_filename_roots:
+                        product_info['index_membership'] = 'both_indexes'
+                    elif filename_root in self.main_filename_roots:
+                        product_info['index_membership'] = 'main_only'
+                    else:
+                        product_info['index_membership'] = 'measurement_only'
+                    
+                    final_results.append(product_info)
+                    logger.debug(f"📏 Created synthetic info for measurement-only product: {filename_root}")
+            
+            if synthetic_count > 0:
+                logger.info(f"📏 Created synthetic info for {synthetic_count} measurement-only products")
             
             logger.info(f"🎯 Combined search results: {len(final_results)} products")
-            logger.info(f"   Main only: {sum(1 for _, s in sorted_results if s['source'] == 'main_only')}")
-            logger.info(f"   Measurement only: {sum(1 for _, s in sorted_results if s['source'] == 'measurement_only')}")
-            logger.info(f"   Both indexes: {sum(1 for _, s in sorted_results if s['source'] == 'both_indexes')}")
+            logger.info(f"   From main search: {sum(1 for _, s in sorted_results if s['source'] == 'main_search')}")
+            logger.info(f"   From measurement search: {sum(1 for _, s in sorted_results if s['source'] == 'measurement_search')}")
+            logger.info(f"   From both searches: {sum(1 for _, s in sorted_results if s['source'] == 'both_searches')}")
             
             return final_results
             
@@ -495,7 +560,12 @@ class DualIndexDataLoader:
     def get_measurement_embedding_by_filename(self, filename_root: str) -> Optional[np.ndarray]:
         """Get measurement embedding for a filename_root"""
         if self.measurement_embeddings is None:
+            logger.warning(f"❌ Measurement embeddings not loaded!")
             return None
+        
+        # Log what we're searching for
+        logger.debug(f"🔍 Searching for measurement embedding: {filename_root}")
+        logger.debug(f"📊 Total measurement embeddings available: {len(self.measurement_filename_to_embedding)}")
         
         # Try direct match and case variations
         variations = [
@@ -506,10 +576,15 @@ class DualIndexDataLoader:
         
         for variant in variations:
             if variant in self.measurement_filename_to_embedding:
+                logger.debug(f"✅ Found measurement embedding for variant: {variant}")
                 return self.measurement_filename_to_embedding[variant]
         
-        # If not found, log for debugging
-        logger.debug(f"Measurement embedding not found for: {filename_root}")
+        # If not found, log for debugging with more detail
+        logger.warning(f"❌ Measurement embedding NOT FOUND for: {filename_root}")
+        logger.debug(f"   Tried variations: {variations}")
+        # Log a sample of available keys for debugging
+        sample_keys = list(self.measurement_filename_to_embedding.keys())[:5]
+        logger.debug(f"   Sample available keys: {sample_keys}")
         return None
     
     def set_scoring_weights(self, main_weight: float, measurement_weight: float):

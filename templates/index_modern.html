@@ -819,7 +819,7 @@
                 
                 // Create checkboxes for priority columns that exist
                 priorityColumns.forEach(col => {
-                    if (window.filterOptions.includes(col)) {
+                    if (window.filterOptions && window.filterOptions.hasOwnProperty(col)) {
                         const div = document.createElement('div');
                         div.className = 'form-check';
                         div.innerHTML = `

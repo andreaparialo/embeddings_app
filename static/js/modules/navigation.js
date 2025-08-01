@@ -53,33 +53,25 @@ export class NavigationManager {
     }
 
     showView(viewId) {
+        console.log('Showing view:', viewId);
+        
         // First, clear all results to prevent overlap
         this.clearAllResults();
         
-        // Force immediate hiding of all views
+        // Hide all views by removing active class
         this.views.forEach(view => {
             view.classList.remove('active');
-            // Force immediate hide to prevent flash
-            view.style.display = 'none';
-            view.style.opacity = '0';
-            view.style.visibility = 'hidden';
         });
         
-        // Small delay to ensure previous view is fully hidden
-        setTimeout(() => {
-            // Reset display for CSS transitions to work
-            this.views.forEach(view => {
-                view.style.display = '';
-            });
-            
-            // Show selected view
-            const targetView = document.getElementById(viewId + '-view');
-            if (targetView) {
-                targetView.classList.add('active');
-                // Force reflow to ensure transition works
-                targetView.offsetHeight;
-            }
-        }, 50);
+        // Show selected view
+        const targetView = document.getElementById(viewId + '-view');
+        if (targetView) {
+            // Add active class immediately
+            targetView.classList.add('active');
+            console.log('Added active class to:', viewId + '-view');
+        } else {
+            console.error('View not found:', viewId + '-view');
+        }
         
         // Update navigation active state
         this.navItems.forEach(item => {
@@ -90,7 +82,9 @@ export class NavigationManager {
         });
         
         // Update page title
-        this.pageTitle.textContent = this.viewTitles[viewId] || 'Vision Search';
+        if (this.pageTitle) {
+            this.pageTitle.textContent = this.viewTitles[viewId] || 'Vision Search';
+        }
         
         // Emit custom event
         window.dispatchEvent(new CustomEvent('viewChanged', { 
